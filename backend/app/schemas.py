@@ -1,9 +1,9 @@
-from pydantic import BaseModel, field_validator, EmailStr
-from typing import Optional
 import re
+from typing import Optional
+from pydantic import BaseModel, field_validator
 
 
-# ── Auth Schemas ──
+# ── Auth ────────────────────────────────────────────
 
 class SignupRequest(BaseModel):
     email: str
@@ -38,11 +38,6 @@ class LoginRequest(BaseModel):
     email: str
     password: str
 
-    @field_validator("email")
-    @classmethod
-    def validate_email(cls, v: str) -> str:
-        return v.strip().lower()
-
 
 class UserResponse(BaseModel):
     id: str
@@ -58,24 +53,13 @@ class TokenResponse(BaseModel):
     user: UserResponse
 
 
-# ── Room Schemas ──
+# ── Rooms ───────────────────────────────────────────
 
 class CreateRoomRequest(BaseModel):
     name: str
     video_url: str
     host_name: str
-
-    @field_validator("video_url")
-    @classmethod
-    def validate_youtube_url(cls, v: str) -> str:
-        youtube_patterns = [
-            r"(https?://)?(www\.)?youtube\.com/watch\?v=[\w-]+",
-            r"(https?://)?(www\.)?youtu\.be/[\w-]+",
-            r"(https?://)?(www\.)?youtube\.com/embed/[\w-]+",
-        ]
-        if not any(re.match(p, v) for p in youtube_patterns):
-            raise ValueError("Must be a valid YouTube URL")
-        return v
+    is_public: bool = True
 
     @field_validator("name")
     @classmethod
@@ -83,6 +67,14 @@ class CreateRoomRequest(BaseModel):
         v = v.strip()
         if len(v) < 1 or len(v) > 100:
             raise ValueError("Room name must be between 1 and 100 characters")
+        return v
+
+    @field_validator("video_url")
+    @classmethod
+    def validate_video_url(cls, v: str) -> str:
+        v = v.strip()
+        if not v:
+            raise ValueError("Video URL is required")
         return v
 
     @field_validator("host_name")
@@ -99,10 +91,14 @@ class RoomResponse(BaseModel):
     name: str
     video_url: str
     host_name: str
+    creator_id: Optional[str] = None
     is_active: bool
+    is_public: bool = True
+    viewer_count: int = 0
     created_at: str
-    creator_id: str | None = None
 
+
+# ── Chat ────────────────────────────────────────────
 
 class ChatMessageResponse(BaseModel):
     id: int
@@ -112,13 +108,13 @@ class ChatMessageResponse(BaseModel):
     created_at: str
 
 
-class JoinRoomRequest(BaseModel):
-    username: str
+class SendMessageRequest(BaseModel):
+    content: str
 
-    @field_validator("username")
+    @field_validator("content")
     @classmethod
-    def validate_username(cls, v: str) -> str:
+    def validate_content(cls, v: str) -> str:
         v = v.strip()
-        if len(v) < 1 or len(v) > 50:
-            raise ValueError("Username must be between 1 and 50 characters")
+        if len(v) < 1 or len(v) > 1000:
+            raise ValueError("Message must be between 1 and 1000 characters")
         return v

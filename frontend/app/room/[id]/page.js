@@ -19,56 +19,27 @@ function getWsUrl() {
 
 function extractVideoId(url) {
     if (!url) return null;
-    const match = url.match(
-        /(?:youtube\.com\/(?:watch\?v=|embed\/)|youtu\.be\/([\w-]+))/
-    );
-    // fallback for watch?v= format
-    const match2 = url.match(/[?&]v=([\w-]+)/);
-    return match2 ? match2[1] : (match ? match[1] : null);
-}
-
-function formatTime(isoString) {
-    const d = new Date(isoString);
-    return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-}
-
-function getUserColor(username) {
-    let hash = 0;
-    for (let i = 0; i < username.length; i++) {
-        hash = username.charCodeAt(i) + ((hash << 5) - hash);
+    const patterns = [
+        /(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/)([^&\s?]+)/,
+        /^([a-zA-Z0-9_-]{11})$/,
+    ];
+    for (const p of patterns) {
+        const m = url.match(p);
+        if (m) return m[1];
     }
-    const hue = Math.abs(hash % 360);
-    return `hsl(${hue}, 70%, 65%)`;
+    return null;
 }
 
-const REACTION_EMOJIS = ["❤️", "😂", "🔥", "👏", "😮", "💯"];
+function formatTime(seconds) {
+    const m = Math.floor(seconds / 60);
+    const s = Math.floor(seconds % 60);
+    return `${m}:${s.toString().padStart(2, "0")}`;
+}
 
-// Simple notification sound via Web Audio API
-function playNotificationSound(type = "message") {
-    try {
-        const ctx = new (window.AudioContext || window.webkitAudioContext)();
-        const osc = ctx.createOscillator();
-        const gain = ctx.createGain();
-        osc.connect(gain);
-        gain.connect(ctx.destination);
-
-        if (type === "join") {
-            osc.frequency.value = 800;
-            gain.gain.value = 0.08;
-        } else if (type === "leave") {
-            osc.frequency.value = 400;
-            gain.gain.value = 0.06;
-        } else {
-            osc.frequency.value = 600;
-            gain.gain.value = 0.05;
-        }
-
-        osc.start();
-        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.15);
-        osc.stop(ctx.currentTime + 0.15);
-    } catch {
-        // Audio not available
-    }
+function getRoleBadge(role) {
+    if (role === "admin") return { label: "ADMIN", className: "role-badge-admin" };
+    if (role === "mod") return { label: "MOD", className: "role-badge-mod" };
+    return null;
 }
 
 
@@ -80,22 +51,21 @@ export default function RoomPage() {
 
     const [room, setRoom] = useState(null);
     const [username, setUsername] = useState("");
-    const [isHost, setIsHost] = useState(false);
+    const [myRole, setMyRole] = useState("member");
     const [joined, setJoined] = useState(false);
     const [joinName, setJoinName] = useState("");
     const [messages, setMessages] = useState([]);
     const [participants, setParticipants] = useState([]);
     const [chatInput, setChatInput] = useState("");
     const [toast, setToast] = useState("");
-    const [connectionState, setConnectionState] = useState("disconnected"); // connected | reconnecting | disconnected
+    const [connectionState, setConnectionState] = useState("disconnected");
     const [error, setError] = useState("");
     const [typingUsers, setTypingUsers] = useState([]);
-    const [reactions, setReactions] = useState({}); // { messageId: { emoji: count } }
     const [showVideoModal, setShowVideoModal] = useState(false);
     const [newVideoUrl, setNewVideoUrl] = useState("");
-    const [showNewMsgPill, setShowNewMsgPill] = useState(false);
-    const [activeReactionPicker, setActiveReactionPicker] = useState(null);
     const [roomIdCopied, setRoomIdCopied] = useState(false);
+    const [volume, setVolume] = useState(80);
+    const [contextMenu, setContextMenu] = useState(null); // { username, x, y }
 
     const wsRef = useRef(null);
     const playerRef = useRef(null);
@@ -109,6 +79,9 @@ export default function RoomPage() {
     const isTyping = useRef(false);
     const isUserNearBottom = useRef(true);
 
+    const canControlVideo = myRole === "admin" || myRole === "mod";
+    const canModerate = myRole === "admin";
+
     /* ── Fetch room info ─────────────────────────── */
     useEffect(() => {
         async function fetchRoom() {
@@ -121,17 +94,15 @@ export default function RoomPage() {
                 const data = await res.json();
                 setRoom(data);
 
-                // Check sessionStorage first (for users coming from landing page)
                 const storedUser = sessionStorage.getItem(`syncroom_user_${roomId}`);
                 const storedHost = sessionStorage.getItem(`syncroom_host_${roomId}`);
                 if (storedUser) {
                     setUsername(storedUser);
-                    setIsHost(storedHost === "true");
+                    if (storedHost === "true") setMyRole("admin");
                     setJoined(true);
                     return;
                 }
 
-                // Check auth state (for direct links on phone/etc)
                 try {
                     const authUser = localStorage.getItem("syncroom_user");
                     if (authUser) {
@@ -156,9 +127,7 @@ export default function RoomPage() {
                     const data = await res.json();
                     setMessages(data.map((m) => ({ ...m, type: "chat:message" })));
                 }
-            } catch {
-                // ignore
-            }
+            } catch { }
         }
         fetchMessages();
     }, [roomId, joined]);
@@ -187,57 +156,45 @@ export default function RoomPage() {
 
     function initPlayer() {
         const videoId = extractVideoId(room?.video_url);
-        if (!videoId) return;
-        if (playerRef.current) return;
+        if (!videoId || playerRef.current) return;
 
         playerRef.current = new window.YT.Player("yt-player", {
             videoId,
-            width: "100%",
-            height: "100%",
-            playerVars: {
-                autoplay: 0,
-                controls: isHost ? 1 : 0,
-                modestbranding: 1,
-                rel: 0,
-            },
+            playerVars: { autoplay: 0, controls: canControlVideo ? 1 : 0, modestbranding: 1, rel: 0 },
             events: {
-                onReady: () => {
+                onReady: (e) => {
                     playerReady.current = true;
+                    e.target.setVolume(volume);
                 },
-                onStateChange: (event) => {
-                    if (!isHost) return;
-                    if (ignoreNextEvent.current) {
-                        ignoreNextEvent.current = false;
-                        return;
-                    }
-
-                    const currentTime = event.target.getCurrentTime();
-
-                    if (event.data === window.YT.PlayerState.PLAYING) {
-                        sendWsMessage({ type: "video:play", timestamp: currentTime });
-                    } else if (event.data === window.YT.PlayerState.PAUSED) {
-                        sendWsMessage({ type: "video:pause", timestamp: currentTime });
-                    }
-                },
+                onStateChange: handlePlayerStateChange,
             },
         });
+    }
 
-        // Track seeking for host
-        if (isHost) {
-            let lastTime = 0;
-            setInterval(() => {
-                if (!playerRef.current || !playerReady.current) return;
-                try {
-                    const currentTime = playerRef.current.getCurrentTime();
-                    const state = playerRef.current.getPlayerState();
-                    if (state === window.YT.PlayerState.PLAYING) {
-                        if (Math.abs(currentTime - lastTime) > 2) {
-                            sendWsMessage({ type: "video:seek", timestamp: currentTime });
-                        }
+    function handlePlayerStateChange(event) {
+        if (ignoreNextEvent.current) {
+            ignoreNextEvent.current = false;
+            return;
+        }
+        if (!canControlVideo) return;
+
+        const state = event.data;
+        const currentTime = playerRef.current?.getCurrentTime() || 0;
+
+        if (state === window.YT.PlayerState.PLAYING) {
+            sendWsMessage({ type: "video:play", timestamp: currentTime });
+        } else if (state === window.YT.PlayerState.PAUSED) {
+            sendWsMessage({ type: "video:pause", timestamp: currentTime });
+        }
+
+        // Detect seeking
+        if (state === window.YT.PlayerState.BUFFERING) {
+            setTimeout(() => {
+                if (playerRef.current) {
+                    const newTime = playerRef.current.getCurrentTime();
+                    if (Math.abs(newTime - currentTime) > 2) {
+                        sendWsMessage({ type: "video:seek", timestamp: newTime });
                     }
-                    lastTime = currentTime;
-                } catch {
-                    // player not ready
                 }
             }, 1000);
         }
@@ -263,8 +220,12 @@ export default function RoomPage() {
                     ws.send(JSON.stringify({ type: "pong" }));
                     break;
 
+                case "role:assigned":
+                    setMyRole(msg.role);
+                    break;
+
                 case "video:play":
-                    if (!isHost && playerRef.current && playerReady.current) {
+                    if (playerRef.current && playerReady.current) {
                         ignoreNextEvent.current = true;
                         playerRef.current.seekTo(msg.timestamp, true);
                         playerRef.current.playVideo();
@@ -276,7 +237,7 @@ export default function RoomPage() {
                     break;
 
                 case "video:pause":
-                    if (!isHost && playerRef.current && playerReady.current) {
+                    if (playerRef.current && playerReady.current) {
                         ignoreNextEvent.current = true;
                         playerRef.current.seekTo(msg.timestamp, true);
                         playerRef.current.pauseVideo();
@@ -288,20 +249,26 @@ export default function RoomPage() {
                     break;
 
                 case "video:seek":
-                    if (!isHost && playerRef.current && playerReady.current) {
+                    if (playerRef.current && playerReady.current) {
                         ignoreNextEvent.current = true;
                         playerRef.current.seekTo(msg.timestamp, true);
                     }
                     break;
 
                 case "video:state":
-                    if (!isHost && playerRef.current && playerReady.current) {
+                    if (playerRef.current && playerReady.current) {
                         ignoreNextEvent.current = true;
                         playerRef.current.seekTo(msg.timestamp, true);
                         if (msg.is_playing) {
                             playerRef.current.playVideo();
                         } else {
                             playerRef.current.pauseVideo();
+                        }
+                    }
+                    if (msg.volume !== undefined) {
+                        setVolume(msg.volume);
+                        if (playerRef.current && playerReady.current) {
+                            playerRef.current.setVolume(msg.volume);
                         }
                     }
                     break;
@@ -319,30 +286,56 @@ export default function RoomPage() {
                     ]);
                     break;
 
+                case "volume:change":
+                    setVolume(msg.volume);
+                    if (playerRef.current && playerReady.current) {
+                        playerRef.current.setVolume(msg.volume);
+                    }
+                    break;
+
                 case "chat:message":
                     setMessages((prev) => [...prev, { ...msg, type: "chat:message" }]);
-                    if (!isUserNearBottom.current) {
-                        setShowNewMsgPill(true);
-                    }
-                    playNotificationSound("message");
                     break;
 
                 case "room:user_joined":
-                    setParticipants(msg.participants);
+                    setParticipants(msg.participants || []);
                     setMessages((prev) => [
                         ...prev,
                         { type: "system", content: `${msg.username} joined the room` },
                     ]);
-                    playNotificationSound("join");
                     break;
 
                 case "room:user_left":
-                    setParticipants(msg.participants);
+                    setParticipants(msg.participants || []);
                     setMessages((prev) => [
                         ...prev,
                         { type: "system", content: `${msg.username} left the room` },
                     ]);
-                    playNotificationSound("leave");
+                    break;
+
+                case "room:user_kicked":
+                    setParticipants(msg.participants || []);
+                    setMessages((prev) => [
+                        ...prev,
+                        { type: "system", content: `${msg.username} was kicked by ${msg.by}` },
+                    ]);
+                    break;
+
+                case "role:changed":
+                    setParticipants(msg.participants || []);
+                    setMessages((prev) => [
+                        ...prev,
+                        { type: "system", content: `${msg.target} is now ${msg.new_role}` },
+                    ]);
+                    break;
+
+                case "role:kicked":
+                    showToast("You have been kicked from the room");
+                    setTimeout(() => router.push("/"), 2000);
+                    break;
+
+                case "error":
+                    showToast(msg.message || "An error occurred");
                     break;
 
                 case "typing:start":
@@ -356,18 +349,12 @@ export default function RoomPage() {
                     break;
 
                 case "reaction:add":
-                    setReactions((prev) => {
-                        const msgReactions = { ...(prev[msg.message_id] || {}) };
-                        msgReactions[msg.emoji] = (msgReactions[msg.emoji] || 0) + 1;
-                        return { ...prev, [msg.message_id]: msgReactions };
-                    });
                     break;
             }
         };
 
         ws.onclose = () => {
             setConnectionState("reconnecting");
-            // Exponential backoff reconnect
             const delay = Math.min(1000 * Math.pow(2, reconnectAttempt.current), 30000);
             reconnectAttempt.current++;
             if (reconnectAttempt.current <= 10) {
@@ -377,10 +364,8 @@ export default function RoomPage() {
             }
         };
 
-        ws.onerror = () => {
-            // onclose will fire after this
-        };
-    }, [joined, username, roomId, isHost]);
+        ws.onerror = () => { };
+    }, [joined, username, roomId]);
 
     useEffect(() => {
         connectWs();
@@ -390,7 +375,7 @@ export default function RoomPage() {
         };
     }, [connectWs]);
 
-    /* ── Auto-scroll / new msg detection ──────────── */
+    /* ── Auto-scroll ─────────────────────────────── */
     useEffect(() => {
         if (isUserNearBottom.current) {
             chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -402,42 +387,37 @@ export default function RoomPage() {
         if (!el) return;
         const isNear = el.scrollHeight - el.scrollTop - el.clientHeight < 60;
         isUserNearBottom.current = isNear;
-        if (isNear) setShowNewMsgPill(false);
     }
 
-    function scrollToBottom() {
-        chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
-        setShowNewMsgPill(false);
-    }
-
-    /* ── WS helpers ───────────────────────────────── */
+    /* ── Helpers ─────────────────────────────────── */
     function sendWsMessage(msg) {
-        if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+        if (wsRef.current?.readyState === WebSocket.OPEN) {
             wsRef.current.send(JSON.stringify(msg));
         }
     }
 
-    function handleSendChat(e) {
+    function showToast(text) {
+        setToast(text);
+        setTimeout(() => setToast(""), 3000);
+    }
+
+    function handleSendMessage(e) {
         e.preventDefault();
         if (!chatInput.trim()) return;
         sendWsMessage({ type: "chat:message", content: chatInput.trim() });
         setChatInput("");
-        // Stop typing
         if (isTyping.current) {
-            sendWsMessage({ type: "typing:stop" });
             isTyping.current = false;
+            sendWsMessage({ type: "typing:stop" });
         }
     }
 
-    function handleChatInputChange(e) {
-        setChatInput(e.target.value);
-
-        // Typing indicator
-        if (!isTyping.current && e.target.value.trim()) {
+    function handleTyping() {
+        if (!isTyping.current) {
             isTyping.current = true;
             sendWsMessage({ type: "typing:start" });
         }
-        if (typingTimeout.current) clearTimeout(typingTimeout.current);
+        clearTimeout(typingTimeout.current);
         typingTimeout.current = setTimeout(() => {
             if (isTyping.current) {
                 isTyping.current = false;
@@ -456,8 +436,7 @@ export default function RoomPage() {
 
     function handleCopyLink() {
         navigator.clipboard.writeText(window.location.href);
-        setToast("Link copied!");
-        setTimeout(() => setToast(""), 2500);
+        showToast("Link copied");
     }
 
     function handleCopyRoomId() {
@@ -472,56 +451,63 @@ export default function RoomPage() {
         sendWsMessage({ type: "video:url_change", video_url: newVideoUrl.trim() });
         setNewVideoUrl("");
         setShowVideoModal(false);
-        setToast("Video changed!");
-        setTimeout(() => setToast(""), 2500);
+        showToast("Video changed");
     }
 
-    function handleReaction(messageId, emoji) {
-        sendWsMessage({ type: "reaction:add", message_id: messageId, emoji });
-        setActiveReactionPicker(null);
+    function handleVolumeChange(val) {
+        const v = parseInt(val);
+        setVolume(v);
+        if (playerRef.current && playerReady.current) {
+            playerRef.current.setVolume(v);
+        }
+        if (canControlVideo) {
+            sendWsMessage({ type: "volume:change", volume: v });
+        }
     }
 
-    /* ── Keyboard shortcuts ───────────────────────── */
+    function handleKick(target) {
+        sendWsMessage({ type: "role:kick", target });
+        setContextMenu(null);
+    }
+
+    function handlePromote(target, role) {
+        sendWsMessage({ type: "role:promote", target, role });
+        setContextMenu(null);
+    }
+
+    function handleDemote(target) {
+        sendWsMessage({ type: "role:demote", target });
+        setContextMenu(null);
+    }
+
+    /* ── Close context menu on outside click ─────── */
     useEffect(() => {
-        function handleKeyDown(e) {
-            // Space to play/pause (host only, when not focused on input)
-            if (isHost && e.code === "Space" && e.target.tagName !== "INPUT" && e.target.tagName !== "TEXTAREA") {
-                e.preventDefault();
-                if (playerRef.current && playerReady.current) {
-                    const state = playerRef.current.getPlayerState();
-                    if (state === window.YT.PlayerState.PLAYING) {
-                        playerRef.current.pauseVideo();
-                    } else {
-                        playerRef.current.playVideo();
-                    }
-                }
-            }
+        function handleClick() { setContextMenu(null); }
+        if (contextMenu) {
+            window.addEventListener("click", handleClick);
+            return () => window.removeEventListener("click", handleClick);
         }
-        if (joined) {
-            window.addEventListener("keydown", handleKeyDown);
-            return () => window.removeEventListener("keydown", handleKeyDown);
-        }
-    }, [joined, isHost]);
+    }, [contextMenu]);
 
     /* ── Error screen ─────────────────────────────── */
     if (error) {
         return (
             <div className="loading-screen">
                 <div style={{ textAlign: "center" }}>
-                    <div className="error-icon">⚠️</div>
+                    <div className="error-icon">!</div>
                     <h2 style={{ marginBottom: 12 }}>{error}</h2>
                     <p style={{ color: "var(--text-secondary)", marginBottom: 24 }}>
-                        The room you're looking for doesn't exist or has been deleted.
+                        The room you are looking for does not exist or has been deleted.
                     </p>
                     <button className="btn-primary" onClick={() => router.push("/")}>
-                        ← Go Home
+                        Go Home
                     </button>
                 </div>
             </div>
         );
     }
 
-    /* ── Loading skeleton ─────────────────────────── */
+    /* ── Loading ──────────────────────────────────── */
     if (!room) {
         return (
             <div className="loading-screen">
@@ -538,9 +524,9 @@ export default function RoomPage() {
         return (
             <div className="join-screen">
                 <div className="join-card">
-                    <div className="join-card-icon">🎬</div>
+                    <div className="join-card-icon">SyncRoom</div>
                     <h1>Join Watch Party</h1>
-                    <p className="join-card-room">📺 {room.name}</p>
+                    <p className="join-card-room">{room.name}</p>
                     <p className="join-card-host">Hosted by {room.host_name}</p>
 
                     <form onSubmit={handleJoin}>
@@ -556,7 +542,7 @@ export default function RoomPage() {
                             />
                         </div>
                         <button type="submit" className="btn-primary" style={{ width: "100%", justifyContent: "center" }}>
-                            Join Room →
+                            Join Room
                         </button>
                     </form>
                 </div>
@@ -566,8 +552,11 @@ export default function RoomPage() {
 
     /* ── Room view ────────────────────────────────── */
     return (
-        <div className="room-page">
-            {/* Connection Status Banner */}
+        <div className="room-page" onClick={() => setContextMenu(null)}>
+            {/* Toast */}
+            {toast && <div className="toast">{toast}</div>}
+
+            {/* Connection Status */}
             {connectionState !== "connected" && (
                 <div className={`connection-banner ${connectionState}`}>
                     {connectionState === "reconnecting" && (
@@ -578,7 +567,7 @@ export default function RoomPage() {
                     )}
                     {connectionState === "disconnected" && (
                         <>
-                            ⚠️ Disconnected — <button onClick={connectWs}>Retry</button>
+                            Disconnected — <button onClick={connectWs}>Retry</button>
                         </>
                     )}
                 </div>
@@ -588,13 +577,14 @@ export default function RoomPage() {
             <header className="room-header">
                 <div className="room-header-left">
                     <button className="room-header-back" onClick={() => router.push("/")}>
-                        ← Home
+                        &larr; Home
                     </button>
                     <div className="room-header-info">
                         <h1>{room.name}</h1>
                         <span>
                             Hosted by {room.host_name}
-                            {isHost && " (you)"}
+                            {myRole === "admin" && " (you)"}
+                            {room.is_public ? "" : " | Private"}
                         </span>
                     </div>
                 </div>
@@ -604,14 +594,14 @@ export default function RoomPage() {
                         {participants.length} watching
                     </div>
                     <button className="room-id-btn" onClick={handleCopyRoomId} title="Copy Room ID">
-                        {roomIdCopied ? "✓ Copied" : `ID: ${roomId.slice(0, 8)}...`}
+                        {roomIdCopied ? "Copied" : `ID: ${roomId.slice(0, 8)}...`}
                     </button>
                     <button className="room-share-btn" onClick={handleCopyLink}>
-                        📋 Share
+                        Share Link
                     </button>
-                    {isHost && (
+                    {canControlVideo && (
                         <button className="room-video-btn" onClick={() => setShowVideoModal(true)} title="Change Video">
-                            🎬 Change Video
+                            Change Video
                         </button>
                     )}
                 </div>
@@ -619,180 +609,147 @@ export default function RoomPage() {
 
             {/* Content */}
             <div className="room-content">
-                {/* Video Area */}
-                <div className="room-video-area">
-                    <div className="video-container">
+                {/* Video + Controls */}
+                <div className="room-video-section">
+                    <div className="video-wrapper">
                         <div id="yt-player" />
+                    </div>
+
+                    {/* Volume Control */}
+                    <div className="video-controls-bar">
+                        <div className="volume-control">
+                            <span className="volume-icon">{volume === 0 ? "muted" : "vol"}</span>
+                            <input
+                                type="range"
+                                min="0"
+                                max="100"
+                                value={volume}
+                                onChange={(e) => handleVolumeChange(e.target.value)}
+                                className="volume-slider"
+                                disabled={!canControlVideo}
+                            />
+                            <span className="volume-value">{volume}%</span>
+                        </div>
+                        <div className="role-indicator">
+                            {myRole === "admin" && <span className="role-tag role-tag-admin">ADMIN</span>}
+                            {myRole === "mod" && <span className="role-tag role-tag-mod">MOD</span>}
+                            {myRole === "member" && <span className="role-tag role-tag-member">MEMBER</span>}
+                        </div>
                     </div>
                 </div>
 
-                {/* Chat Sidebar */}
-                <aside className="chat-sidebar">
+                {/* Sidebar: Participants + Chat */}
+                <div className="room-sidebar">
                     {/* Participants */}
                     <div className="participants-panel">
-                        <h4>In This Room</h4>
-                        <div className="participants-list">
-                            {participants.map((p) => (
-                                <span
-                                    key={p}
-                                    className={`participant-tag ${p === room.host_name ? "host" : ""}`}
-                                >
-                                    <span
-                                        className="participant-avatar"
-                                        style={{ background: getUserColor(p) }}
+                        <h3>Participants ({participants.length})</h3>
+                        <ul className="participants-list">
+                            {participants.map((p) => {
+                                const badge = getRoleBadge(p.role);
+                                const isMe = p.username === username;
+                                return (
+                                    <li key={p.username} className="participant-item"
+                                        onContextMenu={(e) => {
+                                            if (canModerate && !isMe && p.role !== "admin") {
+                                                e.preventDefault();
+                                                setContextMenu({ username: p.username, role: p.role, x: e.clientX, y: e.clientY });
+                                            }
+                                        }}
+                                        onClick={(e) => {
+                                            if (canModerate && !isMe && p.role !== "admin") {
+                                                e.stopPropagation();
+                                                const rect = e.currentTarget.getBoundingClientRect();
+                                                setContextMenu({ username: p.username, role: p.role, x: rect.right, y: rect.top });
+                                            }
+                                        }}
                                     >
-                                        {p.charAt(0).toUpperCase()}
-                                    </span>
-                                    {p}
-                                    {p === room.host_name && " ★"}
-                                </span>
-                            ))}
-                        </div>
+                                        <span className="participant-avatar" style={{ background: `hsl(${(p.username.charCodeAt(0) * 37) % 360}, 60%, 55%)` }}>
+                                            {p.username.charAt(0).toUpperCase()}
+                                        </span>
+                                        <span className="participant-name">
+                                            {p.username}{isMe ? " (you)" : ""}
+                                        </span>
+                                        {badge && <span className={`role-badge ${badge.className}`}>{badge.label}</span>}
+                                    </li>
+                                );
+                            })}
+                        </ul>
                     </div>
+
+                    {/* Context Menu */}
+                    {contextMenu && (
+                        <div className="context-menu" style={{ top: contextMenu.y, left: contextMenu.x }}
+                            onClick={(e) => e.stopPropagation()}>
+                            <div className="context-menu-header">{contextMenu.username}</div>
+                            {contextMenu.role === "member" && (
+                                <button className="context-menu-item" onClick={() => handlePromote(contextMenu.username, "mod")}>
+                                    Promote to Mod
+                                </button>
+                            )}
+                            {contextMenu.role === "mod" && (
+                                <button className="context-menu-item" onClick={() => handleDemote(contextMenu.username)}>
+                                    Demote to Member
+                                </button>
+                            )}
+                            <button className="context-menu-item context-menu-danger" onClick={() => handleKick(contextMenu.username)}>
+                                Kick from Room
+                            </button>
+                        </div>
+                    )}
 
                     {/* Chat */}
-                    <div className="chat-header">
-                        <h3>💬 Chat</h3>
-                        <span className={`chat-status ${connectionState}`}>
-                            {connectionState === "connected" ? "● Connected" : connectionState === "reconnecting" ? "● Reconnecting..." : "● Offline"}
-                        </span>
-                    </div>
-
-                    <div
-                        className="chat-messages"
-                        ref={chatContainerRef}
-                        onScroll={handleChatScroll}
-                    >
-                        {messages.length === 0 && (
-                            <div className="chat-empty">
-                                <div className="chat-empty-icon">💬</div>
-                                <p>No messages yet</p>
-                                <p className="chat-empty-sub">Be the first to say something!</p>
-                            </div>
-                        )}
-                        {messages.map((msg, i) => {
-                            if (msg.type === "system") {
-                                return (
-                                    <div key={i} className="chat-msg-system">
-                                        {msg.content}
-                                    </div>
-                                );
-                            }
-                            const msgReactions = reactions[msg.id] || {};
-                            return (
-                                <div key={msg.id || i} className="chat-msg">
-                                    <div className="chat-msg-header">
-                                        <span
-                                            className="chat-msg-user"
-                                            style={{ color: getUserColor(msg.username) }}
-                                        >
-                                            {msg.username}
-                                            {msg.username === room.host_name && " ★"}
-                                        </span>
-                                        {msg.created_at && (
-                                            <span className="chat-msg-time">
-                                                {formatTime(msg.created_at)}
-                                            </span>
-                                        )}
-                                    </div>
-                                    <div className="chat-msg-content">
-                                        {msg.content}
-                                        <button
-                                            className="chat-msg-react-btn"
-                                            onClick={() =>
-                                                setActiveReactionPicker(
-                                                    activeReactionPicker === msg.id ? null : msg.id
-                                                )
-                                            }
-                                        >
-                                            😊
-                                        </button>
-                                    </div>
-
-                                    {/* Reaction picker */}
-                                    {activeReactionPicker === msg.id && (
-                                        <div className="reaction-picker">
-                                            {REACTION_EMOJIS.map((emoji) => (
-                                                <button
-                                                    key={emoji}
-                                                    onClick={() => handleReaction(msg.id, emoji)}
-                                                >
-                                                    {emoji}
-                                                </button>
-                                            ))}
-                                        </div>
-                                    )}
-
-                                    {/* Reactions display */}
-                                    {Object.keys(msgReactions).length > 0 && (
-                                        <div className="reaction-display">
-                                            {Object.entries(msgReactions).map(([emoji, count]) => (
-                                                <span
-                                                    key={emoji}
-                                                    className="reaction-badge"
-                                                    onClick={() => handleReaction(msg.id, emoji)}
-                                                >
-                                                    {emoji} {count}
-                                                </span>
-                                            ))}
-                                        </div>
+                    <div className="chat-panel">
+                        <h3>Chat</h3>
+                        <div className="chat-messages" ref={chatContainerRef} onScroll={handleChatScroll}>
+                            {messages.map((msg, i) => (
+                                <div key={i} className={`chat-msg ${msg.type === "system" ? "chat-msg-system" : ""}`}>
+                                    {msg.type === "system" ? (
+                                        <span className="chat-system-text">{msg.content}</span>
+                                    ) : (
+                                        <>
+                                            <span className="chat-author">{msg.username}</span>
+                                            <span className="chat-text">{msg.content}</span>
+                                        </>
                                     )}
                                 </div>
-                            );
-                        })}
-                        <div ref={chatEndRef} />
-                    </div>
-
-                    {/* Typing indicator */}
-                    {typingUsers.length > 0 && (
-                        <div className="typing-indicator">
-                            <div className="typing-dots">
-                                <span /><span /><span />
-                            </div>
-                            {typingUsers.length === 1
-                                ? `${typingUsers[0]} is typing...`
-                                : `${typingUsers.length} people are typing...`}
+                            ))}
+                            <div ref={chatEndRef} />
                         </div>
-                    )}
 
-                    {/* New message pill */}
-                    {showNewMsgPill && (
-                        <button className="new-msg-pill" onClick={scrollToBottom}>
-                            ↓ New messages
-                        </button>
-                    )}
+                        {typingUsers.length > 0 && (
+                            <div className="typing-indicator">
+                                {typingUsers.join(", ")} {typingUsers.length === 1 ? "is" : "are"} typing...
+                            </div>
+                        )}
 
-                    <form className="chat-input-area" onSubmit={handleSendChat}>
-                        <input
-                            type="text"
-                            placeholder="Type a message..."
-                            value={chatInput}
-                            onChange={handleChatInputChange}
-                            maxLength={500}
-                        />
-                        <button
-                            type="submit"
-                            className="chat-send-btn"
-                            disabled={!chatInput.trim() || connectionState !== "connected"}
-                        >
-                            Send
-                        </button>
-                    </form>
-                </aside>
+                        <form className="chat-input-form" onSubmit={handleSendMessage}>
+                            <input
+                                type="text"
+                                placeholder="Send a message..."
+                                value={chatInput}
+                                onChange={(e) => {
+                                    setChatInput(e.target.value);
+                                    handleTyping();
+                                }}
+                                maxLength={1000}
+                            />
+                            <button type="submit" className="btn-send">Send</button>
+                        </form>
+                    </div>
+                </div>
             </div>
 
-            {/* Video URL Change Modal */}
+            {/* Change Video Modal */}
             {showVideoModal && (
                 <div className="modal-overlay" onClick={() => setShowVideoModal(false)}>
                     <div className="modal" onClick={(e) => e.stopPropagation()}>
-                        <h2>🎬 Change Video</h2>
-                        <p className="modal-subtitle">Paste a new YouTube URL to switch the video for everyone</p>
+                        <h2>Change Video</h2>
                         <form onSubmit={handleChangeVideo}>
                             <div className="form-group">
-                                <label>YouTube Video URL</label>
+                                <label>Video URL</label>
                                 <input
                                     type="text"
-                                    placeholder="https://www.youtube.com/watch?v=..."
+                                    placeholder="Paste YouTube URL"
                                     value={newVideoUrl}
                                     onChange={(e) => setNewVideoUrl(e.target.value)}
                                     autoFocus
@@ -810,9 +767,6 @@ export default function RoomPage() {
                     </div>
                 </div>
             )}
-
-            {/* Toast */}
-            {toast && <div className="toast">{toast}</div>}
         </div>
     );
 }

@@ -38,6 +38,8 @@ class Room(Base):
     host_name: Mapped[str] = mapped_column(String(50), nullable=False)
     creator_id: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    is_public: Mapped[bool] = mapped_column(Boolean, default=True)
+    viewer_count: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )
@@ -53,6 +55,8 @@ class Room(Base):
             "host_name": self.host_name,
             "creator_id": self.creator_id,
             "is_active": self.is_active,
+            "is_public": self.is_public,
+            "viewer_count": self.viewer_count,
             "created_at": self.created_at.isoformat(),
         }
 
