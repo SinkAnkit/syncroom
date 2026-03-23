@@ -2,11 +2,11 @@
     "rewrites": [
         {
             "source": "/api/:path*",
-            "destination": "https://syncroom-api.onrender.com/api/:path*"
+            "destination": "https://syncroom-joth.onrender.com/api/:path*"
         },
         {
             "source": "/ws/:path*",
-            "destination": "https://syncroom-api.onrender.com/ws/:path*"
+            "destination": "https://syncroom-joth.onrender.com/ws/:path*"
         }
     ]
 }

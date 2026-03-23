@@ -85,3 +85,21 @@ async def delete_room(
     room.is_active = False
     await db.commit()
     return {"detail": "Room deleted"}
+
+
+@router.get("/{room_id}/messages")
+async def get_room_messages(
+    room_id: str,
+    limit: int = Query(100, ge=1, le=500),
+    db: AsyncSession = Depends(get_db),
+):
+    """Get chat messages for a room."""
+    from app.models import ChatMessage
+    result = await db.execute(
+        select(ChatMessage)
+        .where(ChatMessage.room_id == room_id)
+        .order_by(ChatMessage.created_at)
+        .limit(limit)
+    )
+    messages = result.scalars().all()
+    return [m.to_dict() for m in messages]
