@@ -42,6 +42,15 @@ function getRoleBadge(role) {
     return null;
 }
 
+function normalizeParticipants(list) {
+    if (!Array.isArray(list)) return [];
+    return list.map((p) => {
+        if (typeof p === "string") return { username: p, role: "member" };
+        if (p && typeof p === "object" && p.username) return p;
+        return { username: String(p || "Unknown"), role: "member" };
+    });
+}
+
 
 /* ── Component ─────────────────────────────────────── */
 
@@ -298,7 +307,7 @@ export default function RoomPage() {
                     break;
 
                 case "room:user_joined":
-                    setParticipants(msg.participants || []);
+                    setParticipants(normalizeParticipants(msg.participants));
                     setMessages((prev) => [
                         ...prev,
                         { type: "system", content: `${msg.username} joined the room` },
@@ -306,7 +315,7 @@ export default function RoomPage() {
                     break;
 
                 case "room:user_left":
-                    setParticipants(msg.participants || []);
+                    setParticipants(normalizeParticipants(msg.participants));
                     setMessages((prev) => [
                         ...prev,
                         { type: "system", content: `${msg.username} left the room` },
@@ -314,7 +323,7 @@ export default function RoomPage() {
                     break;
 
                 case "room:user_kicked":
-                    setParticipants(msg.participants || []);
+                    setParticipants(normalizeParticipants(msg.participants));
                     setMessages((prev) => [
                         ...prev,
                         { type: "system", content: `${msg.username} was kicked by ${msg.by}` },
@@ -322,7 +331,7 @@ export default function RoomPage() {
                     break;
 
                 case "role:changed":
-                    setParticipants(msg.participants || []);
+                    setParticipants(normalizeParticipants(msg.participants));
                     setMessages((prev) => [
                         ...prev,
                         { type: "system", content: `${msg.target} is now ${msg.new_role}` },
