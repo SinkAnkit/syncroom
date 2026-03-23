@@ -653,30 +653,32 @@ export default function RoomPage() {
                     <div className="participants-panel">
                         <h3>Participants ({participants.length})</h3>
                         <ul className="participants-list">
-                            {participants.map((p) => {
-                                const badge = getRoleBadge(p.role);
-                                const isMe = p.username === username;
+                            {participants.map((p, idx) => {
+                                const pName = (typeof p === "string" ? p : p?.username) || "User";
+                                const pRole = (typeof p === "string" ? "member" : p?.role) || "member";
+                                const badge = getRoleBadge(pRole);
+                                const isMe = pName === username;
                                 return (
-                                    <li key={p.username} className="participant-item"
+                                    <li key={pName + idx} className="participant-item"
                                         onContextMenu={(e) => {
-                                            if (canModerate && !isMe && p.role !== "admin") {
+                                            if (canModerate && !isMe && pRole !== "admin") {
                                                 e.preventDefault();
-                                                setContextMenu({ username: p.username, role: p.role, x: e.clientX, y: e.clientY });
+                                                setContextMenu({ username: pName, role: pRole, x: e.clientX, y: e.clientY });
                                             }
                                         }}
                                         onClick={(e) => {
-                                            if (canModerate && !isMe && p.role !== "admin") {
+                                            if (canModerate && !isMe && pRole !== "admin") {
                                                 e.stopPropagation();
                                                 const rect = e.currentTarget.getBoundingClientRect();
-                                                setContextMenu({ username: p.username, role: p.role, x: rect.right, y: rect.top });
+                                                setContextMenu({ username: pName, role: pRole, x: rect.right, y: rect.top });
                                             }
                                         }}
                                     >
-                                        <span className="participant-avatar" style={{ background: `hsl(${(p.username.charCodeAt(0) * 37) % 360}, 60%, 55%)` }}>
-                                            {p.username.charAt(0).toUpperCase()}
+                                        <span className="participant-avatar" style={{ background: `hsl(${(pName.charCodeAt(0) * 37) % 360}, 60%, 55%)` }}>
+                                            {pName.charAt(0).toUpperCase()}
                                         </span>
                                         <span className="participant-name">
-                                            {p.username}{isMe ? " (you)" : ""}
+                                            {pName}{isMe ? " (you)" : ""}
                                         </span>
                                         {badge && <span className={`role-badge ${badge.className}`}>{badge.label}</span>}
                                     </li>
