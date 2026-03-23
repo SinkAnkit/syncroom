@@ -1,0 +1,12 @@
+{
+    "rewrites": [
+        {
+            "source": "/api/:path*",
+            "destination": "https://syncroom-api.onrender.com/api/:path*"
+        },
+        {
+            "source": "/ws/:path*",
+            "destination": "https://syncroom-api.onrender.com/ws/:path*"
+        }
+    ]
+}
