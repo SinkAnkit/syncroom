@@ -29,10 +29,12 @@ class User(Base):
         }
 
 
+import secrets
+
 class Room(Base):
     __tablename__ = "rooms"
 
-    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: secrets.token_hex(4))
     name: Mapped[str] = mapped_column(String(100), nullable=False)
     video_url: Mapped[str] = mapped_column(Text, nullable=False)
     host_name: Mapped[str] = mapped_column(String(50), nullable=False)
