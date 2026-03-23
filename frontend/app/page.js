@@ -5,8 +5,8 @@ import { useRouter } from "next/navigation";
 
 function getApiUrl() {
   if (typeof window === "undefined") return "http://localhost:8000";
-  const host = window.location.hostname;
-  return `http://${host}:8000`;
+  if (window.location.hostname === "localhost") return "http://localhost:8000";
+  return "https://syncroom-joth.onrender.com";
 }
 
 export default function Home() {
