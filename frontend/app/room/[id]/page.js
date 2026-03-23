@@ -169,11 +169,13 @@ export default function RoomPage() {
 
         playerRef.current = new window.YT.Player("yt-player", {
             videoId,
-            playerVars: { autoplay: 0, controls: canControlVideo ? 1 : 0, modestbranding: 1, rel: 0 },
+            playerVars: { autoplay: 1, controls: 1, modestbranding: 1, rel: 0 },
             events: {
                 onReady: (e) => {
                     playerReady.current = true;
                     e.target.setVolume(volume);
+                    // Auto-play on load
+                    e.target.playVideo();
                 },
                 onStateChange: handlePlayerStateChange,
             },
@@ -231,6 +233,7 @@ export default function RoomPage() {
 
                 case "role:assigned":
                     setMyRole(msg.role);
+                    showToast(`Your role is now: ${msg.role.toUpperCase()}`);
                     break;
 
                 case "video:play":
@@ -339,8 +342,15 @@ export default function RoomPage() {
                     break;
 
                 case "role:kicked":
-                    showToast("You have been kicked from the room");
-                    setTimeout(() => router.push("/"), 2000);
+                    // Close WebSocket immediately
+                    if (wsRef.current) {
+                        wsRef.current.onclose = null;  // prevent auto-reconnect
+                        wsRef.current.close();
+                        wsRef.current = null;
+                    }
+                    setJoined(false);
+                    alert("You have been kicked from the room.");
+                    router.push("/");
                     break;
 
                 case "error":

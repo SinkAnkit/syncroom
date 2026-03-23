@@ -69,6 +69,8 @@ class ConnectionManager:
             ws = self.rooms[room_id][username]
             try:
                 await ws.send_json({"type": "role:kicked", "message": "You have been kicked from the room"})
+                # Small delay to ensure message is delivered before close
+                await asyncio.sleep(0.3)
                 await ws.close(code=4003, reason="Kicked by admin")
             except Exception:
                 pass
