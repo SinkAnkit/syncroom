@@ -121,13 +121,24 @@ export default function RoomPage() {
                 const data = await res.json();
                 setRoom(data);
 
+                // Check sessionStorage first (for users coming from landing page)
                 const storedUser = sessionStorage.getItem(`syncroom_user_${roomId}`);
                 const storedHost = sessionStorage.getItem(`syncroom_host_${roomId}`);
                 if (storedUser) {
                     setUsername(storedUser);
                     setIsHost(storedHost === "true");
                     setJoined(true);
+                    return;
                 }
+
+                // Check auth state (for direct links on phone/etc)
+                try {
+                    const authUser = localStorage.getItem("syncroom_user");
+                    if (authUser) {
+                        const u = JSON.parse(authUser);
+                        setJoinName(u.display_name || "");
+                    }
+                } catch { }
             } catch {
                 setError("Failed to connect to server");
             }
