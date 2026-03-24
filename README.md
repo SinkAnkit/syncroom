@@ -1,25 +1,25 @@
-# 🎬 SyncRoom
+# SyncRoom
 
 **Watch videos together in perfect sync** — with live chat, voice chat, and real-time controls.
 
-🔗 **Live:** [syncroom-ten.vercel.app](https://syncroom-ten.vercel.app)
+**Live:** [syncroom-ten.vercel.app](https://syncroom-ten.vercel.app)
 
 ---
 
-## ✨ Features
+## Features
 
 | Feature | Description |
 |---|---|
-| ⚡ **Instant Sync** | Play, pause, seek — everyone stays perfectly in sync via WebSockets |
-| 💬 **Live Chat** | Real-time chat with typing indicators and emoji reactions |
-| 🎙️ **Voice Chat** | WebRTC peer-to-peer voice — talk live with your watch party |
-| 👥 **Role System** | Admin, Mod, and Member roles with granular permissions |
-| 🔗 **One-Click Share** | Share a room link — no sign-up required to join |
-| 🛡️ **Admin Controls** | Control playback, kick users, promote mods, force-mute members |
-| 🔐 **Auth** | JWT-based signup/login with bcrypt password hashing |
-| 🎥 **Any YouTube Video** | Paste any YouTube link and sync it instantly |
+| **Instant Sync** | Play, pause, seek — everyone stays perfectly in sync via WebSockets |
+| **Live Chat** | Real-time chat with typing indicators and emoji reactions |
+| **Voice Chat** | WebRTC peer-to-peer voice — talk live with your watch party |
+| **Role System** | Admin, Mod, and Member roles with granular permissions |
+| **One-Click Share** | Share a room link — no sign-up required to join |
+| **Admin Controls** | Control playback, kick users, promote mods, force-mute members |
+| **Auth** | JWT-based signup/login with bcrypt password hashing |
+| **Any YouTube Video** | Paste any YouTube link and sync it instantly |
 
-## 🖥️ Tech Stack
+## Tech Stack
 
 | Layer | Technology |
 |---|---|
@@ -31,9 +31,9 @@
 | Auth | JWT tokens, bcrypt password hashing |
 | Hosting | **Vercel** (frontend) + **Render** (backend + PostgreSQL) |
 
-## 🎨 Design
+## Design
 
-- **Discord-inspired dark theme** with deep blacks (`#0b0c0f` → `#22232b`)
+- **Discord-inspired dark theme** with deep blacks (`#0b0c0f` out `#22232b`)
 - **Glassmorphism** — frosted glass cards, modals, and navbar pill
 - **Animated SVG decorations** — headphones, signal rings, waveform equalizer, orbiting dots
 - **Neon glow effects** on buttons, feature icons, and focus states
@@ -72,7 +72,7 @@ docker-compose up --build
 
 Starts PostgreSQL, Redis, backend, and frontend.
 
-## 📁 Project Structure
+## Project Structure
 
 ```
 syncroom/
@@ -101,21 +101,21 @@ syncroom/
 └── start.sh                     # Local dev convenience script
 ```
 
-## 🔌 WebSocket Events
+## WebSocket Events
 
 | Event | Direction | Description |
 |---|---|---|
-| `video:play/pause/seek` | ↔️ | Sync video playback |
-| `video:url_change` | ↔️ | Change the room video |
-| `chat:message` | ↔️ | Send/receive chat |
-| `typing:start/stop` | ↔️ | Typing indicators |
-| `reaction:add` | ↔️ | Emoji reactions |
-| `role:promote/demote/kick` | → | Admin role management |
-| `voice:offer/answer/ice` | ↔️ | WebRTC signaling |
-| `voice:state` | ↔️ | Mic muted/unmuted status |
-| `voice:mute` | → | Admin force-mute |
+| `video:play/pause/seek` | bi-dir | Sync video playback |
+| `video:url_change` | bi-dir | Change the room video |
+| `chat:message` | bi-dir | Send/receive chat |
+| `typing:start/stop` | bi-dir | Typing indicators |
+| `reaction:add` | bi-dir | Emoji reactions |
+| `role:promote/demote/kick` | out | Admin role management |
+| `voice:offer/answer/ice` | bi-dir | WebRTC signaling |
+| `voice:state` | bi-dir | Mic muted/unmuted status |
+| `voice:mute` | out | Admin force-mute |
 
-## 🌐 Deployment
+## Deployment
 
 - **Frontend:** Auto-deploys to Vercel from `main` branch
 - **Backend:** Auto-deploys to Render from `main` branch
