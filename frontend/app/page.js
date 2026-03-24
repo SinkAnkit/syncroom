@@ -103,13 +103,66 @@ const ArrowRight = () => (
 );
 
 /* ── Floating Mascot SVG ───────────────────────────── */
-const FloatingMascot = ({ style }) => (
+const HeadphoneMascot = ({ style }) => (
   <div className="floating-mascot" style={style}>
-    <svg width="120" height="120" viewBox="0 0 120 120" fill="none">
-      <circle cx="60" cy="60" r="50" fill="rgba(88,101,242,0.08)" stroke="rgba(88,101,242,0.15)" strokeWidth="1" />
-      <circle cx="60" cy="60" r="35" fill="rgba(88,101,242,0.05)" stroke="rgba(88,101,242,0.1)" strokeWidth="1" />
-      <circle cx="60" cy="60" r="20" fill="rgba(88,101,242,0.12)" />
-      <path d="M52 55 L72 60 L52 65Z" fill="rgba(124,138,255,0.6)" />
+    <svg width="100" height="100" viewBox="0 0 100 100" fill="none">
+      <circle cx="50" cy="50" r="40" fill="rgba(88,101,242,0.06)" stroke="rgba(88,101,242,0.12)" strokeWidth="1" />
+      <circle cx="50" cy="50" r="28" fill="rgba(88,101,242,0.04)" />
+      {/* Headphone shape */}
+      <path d="M30 55 Q30 35, 50 30 Q70 35, 70 55" stroke="rgba(124,138,255,0.5)" strokeWidth="3" fill="none" strokeLinecap="round" />
+      <rect x="25" y="50" width="10" height="16" rx="4" fill="rgba(124,138,255,0.35)" />
+      <rect x="65" y="50" width="10" height="16" rx="4" fill="rgba(124,138,255,0.35)" />
+      {/* Sound waves */}
+      <path d="M50 42 L50 62" stroke="rgba(0,212,170,0.3)" strokeWidth="2" strokeLinecap="round" className="wave-line-1" />
+      <path d="M44 46 L44 58" stroke="rgba(0,212,170,0.2)" strokeWidth="2" strokeLinecap="round" className="wave-line-2" />
+      <path d="M56 44 L56 60" stroke="rgba(0,212,170,0.2)" strokeWidth="2" strokeLinecap="round" className="wave-line-3" />
+    </svg>
+  </div>
+);
+
+const SignalRings = ({ style }) => (
+  <div className="floating-mascot" style={style}>
+    <svg width="80" height="80" viewBox="0 0 80 80" fill="none">
+      <circle cx="40" cy="40" r="35" stroke="rgba(0,212,170,0.08)" strokeWidth="1" strokeDasharray="8 4" className="logo-ring-spin" style={{ transformOrigin: '40px 40px' }} />
+      <circle cx="40" cy="40" r="24" stroke="rgba(88,101,242,0.12)" strokeWidth="1" strokeDasharray="6 6" className="logo-ring-spin" style={{ transformOrigin: '40px 40px', animationDirection: 'reverse', animationDuration: '12s' }} />
+      <circle cx="40" cy="40" r="12" fill="rgba(88,101,242,0.08)" />
+      <circle cx="40" cy="40" r="4" fill="rgba(124,138,255,0.25)" className="logo-orbit-dot" />
+    </svg>
+  </div>
+);
+
+const OrbitDots = ({ style }) => (
+  <div className="floating-mascot" style={style}>
+    <svg width="90" height="90" viewBox="0 0 90 90" fill="none">
+      <circle cx="45" cy="45" r="30" stroke="rgba(235,69,158,0.06)" strokeWidth="1" />
+      <circle cx="75" cy="45" r="4" fill="rgba(235,69,158,0.25)" className="logo-orbit-dot" />
+      <circle cx="45" cy="15" r="3" fill="rgba(88,101,242,0.2)" className="logo-orbit-dot" style={{ animationDelay: '0.5s' }} />
+      <circle cx="15" cy="45" r="3.5" fill="rgba(0,212,170,0.2)" className="logo-orbit-dot" style={{ animationDelay: '1s' }} />
+      <circle cx="45" cy="75" r="2.5" fill="rgba(124,138,255,0.15)" className="logo-orbit-dot" style={{ animationDelay: '1.5s' }} />
+    </svg>
+  </div>
+);
+
+const WaveformIcon = ({ style }) => (
+  <div className="floating-mascot" style={style}>
+    <svg width="70" height="50" viewBox="0 0 70 50" fill="none">
+      <rect x="5" y="18" width="4" height="14" rx="2" fill="rgba(88,101,242,0.2)" className="wave-bar-1" />
+      <rect x="14" y="10" width="4" height="30" rx="2" fill="rgba(0,212,170,0.18)" className="wave-bar-2" />
+      <rect x="23" y="14" width="4" height="22" rx="2" fill="rgba(235,69,158,0.15)" className="wave-bar-3" />
+      <rect x="32" y="6" width="4" height="38" rx="2" fill="rgba(88,101,242,0.22)" className="wave-bar-4" />
+      <rect x="41" y="12" width="4" height="26" rx="2" fill="rgba(0,212,170,0.18)" className="wave-bar-5" />
+      <rect x="50" y="16" width="4" height="18" rx="2" fill="rgba(235,69,158,0.15)" className="wave-bar-6" />
+      <rect x="59" y="20" width="4" height="10" rx="2" fill="rgba(88,101,242,0.12)" className="wave-bar-7" />
+    </svg>
+  </div>
+);
+
+const SyncArrows = ({ style }) => (
+  <div className="floating-mascot" style={style}>
+    <svg width="60" height="60" viewBox="0 0 60 60" fill="none" className="logo-ring-spin" style={{ transformOrigin: '30px 30px', animationDuration: '20s' }}>
+      <path d="M30 8 L38 16 L30 16 L30 28" stroke="rgba(0,212,170,0.2)" strokeWidth="2" fill="none" strokeLinecap="round" />
+      <path d="M30 52 L22 44 L30 44 L30 32" stroke="rgba(88,101,242,0.2)" strokeWidth="2" fill="none" strokeLinecap="round" />
+      <circle cx="30" cy="30" r="20" stroke="rgba(88,101,242,0.06)" strokeWidth="1" strokeDasharray="4 4" />
     </svg>
   </div>
 );
@@ -264,9 +317,12 @@ export default function Home() {
       <canvas ref={canvasRef} className="particle-canvas" />
       <div className="landing-bg" />
 
-      {/* Floating decorative mascots */}
-      <FloatingMascot style={{ position: "absolute", top: "15%", right: "8%", opacity: 0.4, animation: "floatMascot1 12s ease-in-out infinite" }} />
-      <FloatingMascot style={{ position: "absolute", bottom: "20%", left: "5%", opacity: 0.3, animation: "floatMascot2 15s ease-in-out infinite", transform: "scale(0.7)" }} />
+      {/* Floating animated SVG decorations */}
+      <HeadphoneMascot style={{ position: "absolute", top: "12%", right: "6%", animation: "floatMascot1 14s ease-in-out infinite" }} />
+      <SignalRings style={{ position: "absolute", top: "60%", right: "10%", animation: "floatMascot2 18s ease-in-out infinite" }} />
+      <OrbitDots style={{ position: "absolute", top: "30%", left: "4%", animation: "floatMascot1 16s ease-in-out infinite", animationDelay: "2s" }} />
+      <WaveformIcon style={{ position: "absolute", bottom: "25%", left: "8%", animation: "floatMascot2 13s ease-in-out infinite" }} />
+      <SyncArrows style={{ position: "absolute", bottom: "15%", right: "15%", animation: "floatMascot1 20s ease-in-out infinite", animationDelay: "4s" }} />
 
       {/* Navbar */}
       <nav className="navbar">
