@@ -41,7 +41,7 @@
 - **Particle canvas** with tri-color (blurple/cyan/pink) connected dots
 - **Spring-eased animations** with `cubic-bezier(0.34, 1.56, 0.64, 1)`
 
-## 🚀 Quick Start
+## Quick Start
 
 ### Local Development
 
