@@ -899,22 +899,105 @@ textarea {
 
 /* ═══ Footer ═══ */
 .footer {
-  padding: 36px;
-  text-align: center;
+  padding: 0;
   border-top: 1px solid var(--border);
   color: var(--text-muted);
-  font-size: 0.8rem;
+  font-size: 0.84rem;
+  background: var(--bg-primary);
+}
+
+.footer-content {
+  display: flex;
+  justify-content: space-between;
+  gap: 48px;
+  max-width: 1080px;
+  margin: 0 auto;
+  padding: 60px 32px 40px;
+}
+
+.footer-brand {
+  max-width: 280px;
 }
 
 .footer-logo {
   display: flex;
   align-items: center;
-  justify-content: center;
-  gap: 8px;
-  font-size: 0.95rem;
-  font-weight: 700;
+  gap: 10px;
+  font-size: 1.1rem;
+  font-weight: 800;
+  color: var(--text-primary);
+  margin-bottom: 14px;
+}
+
+.footer-tagline {
+  color: var(--text-muted);
+  font-size: 0.84rem;
+  line-height: 1.6;
+}
+
+.footer-links-section {
+  display: flex;
+  gap: 60px;
+}
+
+.footer-col {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.footer-col h4 {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
   color: var(--text-secondary);
-  margin-bottom: 10px;
+  font-weight: 700;
+  margin-bottom: 4px;
+}
+
+.footer-col a,
+.footer-col button {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: 0.84rem;
+  text-align: left;
+  cursor: pointer;
+  transition: var(--transition);
+  padding: 0;
+}
+
+.footer-col a:hover,
+.footer-col button:hover {
+  color: var(--text-primary);
+}
+
+.footer-social-link {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.footer-social-link svg {
+  opacity: 0.6;
+  transition: var(--transition);
+}
+
+.footer-social-link:hover svg {
+  opacity: 1;
+}
+
+.footer-bottom {
+  border-top: 1px solid var(--border);
+  padding: 20px 32px;
+  text-align: center;
+}
+
+.footer-trademark {
+  color: var(--text-muted);
+  font-size: 0.78rem;
+  font-weight: 500;
+  letter-spacing: 0.01em;
 }
 
 /* ═══ Public Room Badge ═══ */
@@ -1566,6 +1649,94 @@ textarea {
 .chat-send-btn:disabled {
   opacity: 0.4;
   cursor: not-allowed;
+}
+
+/* ═══ Voice Chat Controls ═══ */
+.voice-controls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.voice-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 14px;
+  border-radius: var(--radius-sm);
+  font-size: 0.75rem;
+  font-weight: 600;
+  background: var(--bg-glass-strong);
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+  transition: var(--transition);
+  cursor: pointer;
+}
+
+.voice-btn:hover {
+  border-color: var(--border-hover);
+  color: var(--text-primary);
+}
+
+.voice-btn.voice-live {
+  background: rgba(59, 165, 93, 0.1);
+  border-color: rgba(59, 165, 93, 0.3);
+  color: var(--green);
+  box-shadow: 0 0 12px rgba(59, 165, 93, 0.15);
+}
+
+.voice-btn.voice-live:hover {
+  background: rgba(59, 165, 93, 0.15);
+}
+
+.voice-btn.voice-muted {
+  background: rgba(237, 66, 69, 0.08);
+  border-color: rgba(237, 66, 69, 0.25);
+  color: var(--red);
+}
+
+.voice-btn.voice-muted:hover {
+  background: rgba(237, 66, 69, 0.12);
+}
+
+.voice-leave-btn {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 12px;
+  border-radius: var(--radius-sm);
+  font-size: 0.72rem;
+  font-weight: 600;
+  background: rgba(237, 66, 69, 0.08);
+  border: 1px solid rgba(237, 66, 69, 0.2);
+  color: var(--red);
+  transition: var(--transition);
+  cursor: pointer;
+}
+
+.voice-leave-btn:hover {
+  background: rgba(237, 66, 69, 0.15);
+}
+
+.voice-indicator {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  align-items: center;
+  justify-content: center;
+}
+
+.voice-indicator-live {
+  color: var(--green);
+  animation: pulseGlow 2s infinite;
+}
+
+.voice-indicator-muted {
+  color: var(--red);
+  opacity: 0.6;
 }
 
 /* ═══ Typing Indicator ═══ */

@@ -367,6 +367,72 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str, username: str =
                     "username": username,
                 })
 
+            # ── WebRTC Voice Chat Signaling ──────────────
+
+            elif msg_type == "voice:offer":
+                # Relay SDP offer to a specific peer
+                target = message.get("target", "")
+                if target:
+                    await manager.send_to(room_id, target, {
+                        "type": "voice:offer",
+                        "sdp": message.get("sdp"),
+                        "from": username,
+                    })
+
+            elif msg_type == "voice:answer":
+                # Relay SDP answer back to the offering peer
+                target = message.get("target", "")
+                if target:
+                    await manager.send_to(room_id, target, {
+                        "type": "voice:answer",
+                        "sdp": message.get("sdp"),
+                        "from": username,
+                    })
+
+            elif msg_type == "voice:ice":
+                # Relay ICE candidate to a specific peer
+                target = message.get("target", "")
+                if target:
+                    await manager.send_to(room_id, target, {
+                        "type": "voice:ice",
+                        "candidate": message.get("candidate"),
+                        "from": username,
+                    })
+
+            elif msg_type == "voice:state":
+                # User toggled their mic — broadcast to all
+                await manager.broadcast(room_id, {
+                    "type": "voice:state",
+                    "username": username,
+                    "muted": message.get("muted", True),
+                    "active": message.get("active", False),
+                })
+
+            elif msg_type == "voice:mute":
+                # Admin force-mutes a member
+                if not can_moderate(current_role):
+                    await manager.send_to(room_id, username, {
+                        "type": "error", "message": "No permission to mute users"
+                    })
+                    continue
+                target = message.get("target", "")
+                target_role = await redis_client.get_user_role(room_id, target)
+                if target_role == ROLE_ADMIN:
+                    continue  # Can't mute admin
+                # Send force-mute to the target
+                await manager.send_to(room_id, target, {
+                    "type": "voice:force_mute",
+                    "by": username,
+                })
+                # Broadcast updated state
+                await manager.broadcast(room_id, {
+                    "type": "voice:state",
+                    "username": target,
+                    "muted": True,
+                    "active": True,
+                    "forced": True,
+                })
+
     except WebSocketDisconnect:
         pass
     except Exception as e:

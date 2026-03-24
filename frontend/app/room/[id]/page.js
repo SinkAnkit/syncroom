@@ -74,7 +74,10 @@ export default function RoomPage() {
     const [newVideoUrl, setNewVideoUrl] = useState("");
     const [roomIdCopied, setRoomIdCopied] = useState(false);
     const [volume, setVolume] = useState(80);
-    const [contextMenu, setContextMenu] = useState(null); // { username, x, y }
+    const [contextMenu, setContextMenu] = useState(null);
+    const [voiceActive, setVoiceActive] = useState(false);
+    const [voiceMuted, setVoiceMuted] = useState(true);
+    const [voiceUsers, setVoiceUsers] = useState({}); // { username: { muted, active } }
 
     const wsRef = useRef(null);
     const playerRef = useRef(null);
@@ -87,6 +90,9 @@ export default function RoomPage() {
     const typingTimeout = useRef(null);
     const isTyping = useRef(false);
     const isUserNearBottom = useRef(true);
+    const peerConnections = useRef({});
+    const localStream = useRef(null);
+    const remoteAudios = useRef({});
 
     const canControlVideo = myRole === "admin" || myRole === "mod";
     const canModerate = myRole === "admin";
@@ -223,7 +229,7 @@ export default function RoomPage() {
             reconnectAttempt.current = 0;
         };
 
-        ws.onmessage = (event) => {
+        ws.onmessage = async (event) => {
             const msg = JSON.parse(event.data);
 
             switch (msg.type) {
@@ -369,6 +375,43 @@ export default function RoomPage() {
 
                 case "reaction:add":
                     break;
+
+                // ── Voice Chat WebRTC Signaling ──
+                case "voice:offer": {
+                    const pc = createPeer(msg.from, false);
+                    await pc.setRemoteDescription(new RTCSessionDescription(msg.sdp));
+                    const answer = await pc.createAnswer();
+                    await pc.setLocalDescription(answer);
+                    sendWsMessage({ type: "voice:answer", target: msg.from, sdp: answer });
+                    break;
+                }
+                case "voice:answer": {
+                    const pc = peerConnections.current[msg.from];
+                    if (pc) await pc.setRemoteDescription(new RTCSessionDescription(msg.sdp));
+                    break;
+                }
+                case "voice:ice": {
+                    const pc = peerConnections.current[msg.from];
+                    if (pc && msg.candidate) {
+                        await pc.addIceCandidate(new RTCIceCandidate(msg.candidate));
+                    }
+                    break;
+                }
+                case "voice:state":
+                    setVoiceUsers(prev => ({
+                        ...prev,
+                        [msg.username]: { muted: msg.muted, active: msg.active }
+                    }));
+                    break;
+                case "voice:force_mute":
+                    // Admin force-muted us
+                    if (localStream.current) {
+                        localStream.current.getAudioTracks().forEach(t => t.enabled = false);
+                    }
+                    setVoiceMuted(true);
+                    showToast(`You were muted by ${msg.by}`);
+                    sendWsMessage({ type: "voice:state", muted: true, active: voiceActive });
+                    break;
             }
         };
 
@@ -497,6 +540,95 @@ export default function RoomPage() {
     function handleDemote(target) {
         sendWsMessage({ type: "role:demote", target });
         setContextMenu(null);
+    }
+
+    function handleForceMute(target) {
+        sendWsMessage({ type: "voice:mute", target });
+        setContextMenu(null);
+        showToast(`Muted ${target}`);
+    }
+
+    /* ── WebRTC Voice Chat ────────────────────────── */
+    function createPeer(targetUsername, isInitiator) {
+        const pc = new RTCPeerConnection({
+            iceServers: [
+                { urls: "stun:stun.l.google.com:19302" },
+                { urls: "stun:stun1.l.google.com:19302" },
+            ]
+        });
+        peerConnections.current[targetUsername] = pc;
+
+        pc.onicecandidate = (e) => {
+            if (e.candidate) {
+                sendWsMessage({ type: "voice:ice", target: targetUsername, candidate: e.candidate });
+            }
+        };
+
+        pc.ontrack = (e) => {
+            const audio = new Audio();
+            audio.srcObject = e.streams[0];
+            audio.autoplay = true;
+            remoteAudios.current[targetUsername] = audio;
+        };
+
+        if (localStream.current) {
+            localStream.current.getTracks().forEach(track => {
+                pc.addTrack(track, localStream.current);
+            });
+        }
+
+        if (isInitiator) {
+            pc.createOffer().then(offer => {
+                pc.setLocalDescription(offer);
+                sendWsMessage({ type: "voice:offer", target: targetUsername, sdp: offer });
+            });
+        }
+
+        return pc;
+    }
+
+    async function toggleVoice() {
+        if (!voiceActive) {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                localStream.current = stream;
+                setVoiceActive(true);
+                setVoiceMuted(false);
+                sendWsMessage({ type: "voice:state", muted: false, active: true });
+                // Connect to all existing participants
+                participants.forEach(p => {
+                    const pName = typeof p === "string" ? p : p?.username;
+                    if (pName && pName !== username && !peerConnections.current[pName]) {
+                        createPeer(pName, true);
+                    }
+                });
+                showToast("Voice chat joined");
+            } catch {
+                showToast("Microphone access denied");
+            }
+        } else {
+            // Leave voice
+            if (localStream.current) {
+                localStream.current.getTracks().forEach(t => t.stop());
+                localStream.current = null;
+            }
+            Object.values(peerConnections.current).forEach(pc => pc.close());
+            peerConnections.current = {};
+            Object.values(remoteAudios.current).forEach(a => { a.pause(); a.srcObject = null; });
+            remoteAudios.current = {};
+            setVoiceActive(false);
+            setVoiceMuted(true);
+            sendWsMessage({ type: "voice:state", muted: true, active: false });
+            showToast("Voice chat left");
+        }
+    }
+
+    function toggleMic() {
+        if (!localStream.current) return;
+        const newMuted = !voiceMuted;
+        localStream.current.getAudioTracks().forEach(t => t.enabled = !newMuted);
+        setVoiceMuted(newMuted);
+        sendWsMessage({ type: "voice:state", muted: newMuted, active: true });
     }
 
     /* ── Close context menu on outside click ─────── */
@@ -649,6 +781,26 @@ export default function RoomPage() {
                             />
                             <span className="volume-value">{volume}%</span>
                         </div>
+                        <div className="voice-controls">
+                            <button className={`voice-btn ${voiceActive ? (voiceMuted ? 'voice-muted' : 'voice-live') : ''}`} onClick={voiceActive ? toggleMic : toggleVoice} title={voiceActive ? (voiceMuted ? 'Unmute' : 'Mute') : 'Join Voice'}>
+                                {voiceActive ? (
+                                    voiceMuted ? (
+                                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="1" y1="1" x2="23" y2="23" /><path d="M9 9v3a3 3 0 0 0 5.12 2.12M15 9.34V4a3 3 0 0 0-5.94-.6" /><path d="M17 16.95A7 7 0 0 1 5 12v-2m14 0v2c0 .76-.13 1.49-.36 2.18" /><line x1="12" y1="19" x2="12" y2="23" /><line x1="8" y1="23" x2="16" y2="23" /></svg>
+                                    ) : (
+                                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" /><path d="M19 10v2a7 7 0 0 1-14 0v-2" /><line x1="12" y1="19" x2="12" y2="23" /><line x1="8" y1="23" x2="16" y2="23" /></svg>
+                                    )
+                                ) : (
+                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" /><path d="M19 10v2a7 7 0 0 1-14 0v-2" /><line x1="12" y1="19" x2="12" y2="23" /><line x1="8" y1="23" x2="16" y2="23" /></svg>
+                                )}
+                                <span>{voiceActive ? (voiceMuted ? 'Muted' : 'Live') : 'Voice'}</span>
+                            </button>
+                            {voiceActive && (
+                                <button className="voice-leave-btn" onClick={toggleVoice} title="Leave Voice">
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M16 2H8a2 2 0 0 0-2 2v16l6-3 6 3V4a2 2 0 0 0-2-2z" /></svg>
+                                    Leave
+                                </button>
+                            )}
+                        </div>
                         <div className="role-indicator">
                             {myRole === "admin" && <span className="role-tag role-tag-admin">ADMIN</span>}
                             {myRole === "mod" && <span className="role-tag role-tag-mod">MOD</span>}
@@ -691,6 +843,15 @@ export default function RoomPage() {
                                             {pName}{isMe ? " (you)" : ""}
                                         </span>
                                         {badge && <span className={`role-badge ${badge.className}`}>{badge.label}</span>}
+                                        {voiceUsers[pName]?.active && (
+                                            <span className={`voice-indicator ${voiceUsers[pName]?.muted ? 'voice-indicator-muted' : 'voice-indicator-live'}`} title={voiceUsers[pName]?.muted ? 'Muted' : 'Speaking'}>
+                                                {voiceUsers[pName]?.muted ? (
+                                                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><line x1="1" y1="1" x2="23" y2="23" /><path d="M9 9v3a3 3 0 0 0 5.12 2.12" /></svg>
+                                                ) : (
+                                                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" /></svg>
+                                                )}
+                                            </span>
+                                        )}
                                     </li>
                                 );
                             })}
@@ -710,6 +871,11 @@ export default function RoomPage() {
                             {contextMenu.role === "mod" && (
                                 <button className="context-menu-item" onClick={() => handleDemote(contextMenu.username)}>
                                     Demote to Member
+                                </button>
+                            )}
+                            {voiceUsers[contextMenu.username]?.active && !voiceUsers[contextMenu.username]?.muted && (
+                                <button className="context-menu-item" onClick={() => handleForceMute(contextMenu.username)}>
+                                    🔇 Force Mute
                                 </button>
                             )}
                             <button className="context-menu-item context-menu-danger" onClick={() => handleKick(contextMenu.username)}>
