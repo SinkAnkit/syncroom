@@ -257,29 +257,34 @@ textarea {
 .navbar-auth {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
 }
 
 .navbar-user {
   display: flex;
   align-items: center;
-  gap: 8px;
-  font-size: 0.84rem;
-  color: var(--text-secondary);
-  font-weight: 500;
+  gap: 10px;
+  font-size: 0.88rem;
+  color: var(--text-primary);
+  font-weight: 600;
+  padding: 5px 14px 5px 5px;
+  background: var(--bg-glass);
+  border: 1px solid var(--border-glass);
+  border-radius: 100px;
+  backdrop-filter: blur(12px);
 }
 
 .navbar-user-avatar {
-  width: 30px;
-  height: 30px;
+  width: 32px;
+  height: 32px;
   border-radius: 50%;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 0.72rem;
-  font-weight: 700;
+  font-size: 0.75rem;
+  font-weight: 800;
   color: white;
-  box-shadow: 0 0 0 2px var(--bg-deepest), 0 0 0 3px var(--border-glass);
+  box-shadow: 0 0 0 2px var(--bg-deepest), 0 0 8px rgba(0, 0, 0, 0.3);
 }
 
 .navbar-login {
@@ -297,19 +302,20 @@ textarea {
 }
 
 .navbar-logout {
-  padding: 6px 14px;
+  padding: 7px 14px;
   background: transparent;
   color: var(--text-muted);
-  border: 1px solid var(--border);
+  border: 1px solid rgba(255, 255, 255, 0.06);
   border-radius: var(--radius-sm);
   font-size: 0.78rem;
+  font-weight: 500;
   transition: var(--transition);
 }
 
 .navbar-logout:hover {
   color: var(--red);
-  border-color: rgba(237, 66, 69, 0.3);
-  background: var(--red-glow);
+  border-color: rgba(237, 66, 69, 0.25);
+  background: rgba(237, 66, 69, 0.06);
 }
 
 /* ═══ Hero Section ═══ */
