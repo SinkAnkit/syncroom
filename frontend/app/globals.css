@@ -714,6 +714,49 @@ textarea {
   color: var(--fuchsia);
 }
 
+/* Neon feature icon variants */
+.feature-icon-neon-purple {
+  background: rgba(88, 101, 242, 0.1);
+  color: #7c8aff;
+  box-shadow: 0 0 20px rgba(88, 101, 242, 0.1);
+}
+
+.feature-icon-neon-cyan {
+  background: rgba(0, 212, 170, 0.1);
+  color: var(--cyan);
+  box-shadow: 0 0 20px rgba(0, 212, 170, 0.1);
+}
+
+.feature-icon-neon-pink {
+  background: rgba(235, 69, 158, 0.1);
+  color: var(--fuchsia);
+  box-shadow: 0 0 20px rgba(235, 69, 158, 0.1);
+}
+
+/* Glow button */
+.btn-glow {
+  box-shadow: 0 0 20px var(--blurple-glow), 0 2px 8px rgba(0, 0, 0, 0.3);
+}
+
+.btn-glow:hover {
+  box-shadow: 0 0 40px var(--blurple-glow), 0 0 80px rgba(88, 101, 242, 0.15), 0 4px 16px rgba(0, 0, 0, 0.3);
+}
+
+/* Floating mascot decorations */
+.floating-mascot {
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* Footer trademark */
+.footer-trademark {
+  color: var(--text-muted);
+  font-size: 0.78rem;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  margin-top: 4px;
+}
+
 .feature-card h3 {
   font-size: 1rem;
   font-weight: 700;
@@ -2111,6 +2154,42 @@ textarea {
 
   66% {
     transform: translate(30px, -40px);
+  }
+}
+
+@keyframes floatMascot1 {
+
+  0%,
+  100% {
+    transform: translate(0, 0) rotate(0deg);
+  }
+
+  25% {
+    transform: translate(-15px, 20px) rotate(5deg);
+  }
+
+  50% {
+    transform: translate(10px, -15px) rotate(-3deg);
+  }
+
+  75% {
+    transform: translate(-8px, 10px) rotate(2deg);
+  }
+}
+
+@keyframes floatMascot2 {
+
+  0%,
+  100% {
+    transform: scale(0.7) translate(0, 0) rotate(0deg);
+  }
+
+  33% {
+    transform: scale(0.7) translate(20px, -25px) rotate(-5deg);
+  }
+
+  66% {
+    transform: scale(0.7) translate(-15px, 15px) rotate(3deg);
   }
 }
 
