@@ -194,27 +194,26 @@ textarea {
   color: var(--text-primary);
 }
 
-.navbar-logo-icon {
-  width: 34px;
-  height: 34px;
-  border-radius: var(--radius-md);
-  background: var(--gradient-brand);
-  background-size: 200% 200%;
-  animation: gradientShift 6s ease infinite;
+.logo-icon {
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 0.9rem;
-  font-weight: 900;
-  color: white;
-  box-shadow: 0 0 16px var(--blurple-glow);
+  filter: drop-shadow(0 0 12px rgba(88, 101, 242, 0.4));
   transition: var(--transition);
 }
 
-.navbar-logo:hover .navbar-logo-icon {
-  border-radius: var(--radius-lg);
-  box-shadow: 0 0 28px var(--blurple-glow);
-  transform: scale(1.05);
+.navbar-logo:hover .logo-icon {
+  filter: drop-shadow(0 0 20px rgba(88, 101, 242, 0.6));
+  transform: scale(1.08);
+}
+
+.logo-ring-spin {
+  transform-origin: 24px 24px;
+  animation: spin 8s linear infinite;
+}
+
+.logo-orbit-dot {
+  animation: pulseGlow 2s ease-in-out infinite;
 }
 
 .navbar-links {
@@ -461,9 +460,9 @@ textarea {
   max-width: 880px;
   border-radius: var(--radius-xl);
   overflow: hidden;
-  border: 1px solid rgba(88, 101, 242, 0.12);
-  background: var(--bg-primary);
-  box-shadow: 0 20px 80px rgba(0, 0, 0, 0.5), 0 0 100px rgba(88, 101, 242, 0.06);
+  border: 1px solid rgba(88, 101, 242, 0.25);
+  background: var(--bg-secondary);
+  box-shadow: 0 20px 80px rgba(0, 0, 0, 0.6), 0 0 120px rgba(88, 101, 242, 0.12), 0 0 0 1px rgba(88, 101, 242, 0.08);
   animation: fadeInUp 0.8s var(--ease-out) 0.5s both;
   position: relative;
 }
@@ -471,9 +470,9 @@ textarea {
 .hero-preview::before {
   content: '';
   position: absolute;
-  inset: -1px;
-  border-radius: var(--radius-xl);
-  background: linear-gradient(135deg, rgba(88, 101, 242, 0.2), transparent 40%, transparent 60%, rgba(235, 69, 158, 0.1));
+  inset: -2px;
+  border-radius: calc(var(--radius-xl) + 2px);
+  background: linear-gradient(135deg, rgba(88, 101, 242, 0.35), rgba(0, 212, 170, 0.12) 40%, transparent 60%, rgba(235, 69, 158, 0.2));
   z-index: -1;
   pointer-events: none;
 }

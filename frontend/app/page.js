@@ -12,23 +12,35 @@ function getApiUrl() {
 /* ── SVG Icons ─────────────────────────────────────── */
 
 const SyncRoomLogo = () => (
-  <svg width="38" height="38" viewBox="0 0 40 40" fill="none">
-    <defs>
-      <linearGradient id="logoGrad" x1="0" y1="0" x2="40" y2="40">
-        <stop offset="0%" stopColor="#7c5cfc" />
-        <stop offset="50%" stopColor="#5865f2" />
-        <stop offset="100%" stopColor="#00d4aa" />
-      </linearGradient>
-      <linearGradient id="playGrad" x1="14" y1="10" x2="30" y2="30">
-        <stop offset="0%" stopColor="#fff" />
-        <stop offset="100%" stopColor="#e0e0ff" />
-      </linearGradient>
-    </defs>
-    <rect width="40" height="40" rx="12" fill="url(#logoGrad)" />
-    <path d="M16 12 L30 20 L16 28Z" fill="url(#playGrad)" opacity="0.95" />
-    <circle cx="30" cy="10" r="5" fill="#00d4aa" opacity="0.8" />
-    <circle cx="30" cy="10" r="2.5" fill="#fff" />
-  </svg>
+  <div className="logo-icon">
+    <svg width="36" height="36" viewBox="0 0 48 48" fill="none">
+      <defs>
+        <linearGradient id="ring1" x1="0" y1="0" x2="48" y2="48">
+          <stop offset="0%" stopColor="#7c8aff" />
+          <stop offset="100%" stopColor="#5865f2" />
+        </linearGradient>
+        <linearGradient id="ring2" x1="48" y1="0" x2="0" y2="48">
+          <stop offset="0%" stopColor="#00d4aa" />
+          <stop offset="100%" stopColor="#5865f2" />
+        </linearGradient>
+        <linearGradient id="playFill" x1="18" y1="14" x2="34" y2="34">
+          <stop offset="0%" stopColor="#fff" />
+          <stop offset="100%" stopColor="#c8d0ff" />
+        </linearGradient>
+      </defs>
+      {/* Outer ring */}
+      <circle cx="24" cy="24" r="22" stroke="url(#ring1)" strokeWidth="2.5" fill="none" opacity="0.5" />
+      {/* Inner ring with rotation */}
+      <circle cx="24" cy="24" r="16" stroke="url(#ring2)" strokeWidth="2" fill="none" opacity="0.7" strokeDasharray="12 6" className="logo-ring-spin" />
+      {/* Filled center */}
+      <circle cx="24" cy="24" r="11" fill="#5865f2" opacity="0.15" />
+      {/* Play triangle */}
+      <path d="M20 16 L34 24 L20 32Z" fill="url(#playFill)" />
+      {/* Orbiting sync dot */}
+      <circle cx="44" cy="14" r="3.5" fill="#00d4aa" className="logo-orbit-dot" />
+      <circle cx="44" cy="14" r="1.8" fill="#fff" className="logo-orbit-dot" />
+    </svg>
+  </div>
 );
 
 const BoltIcon = () => (
