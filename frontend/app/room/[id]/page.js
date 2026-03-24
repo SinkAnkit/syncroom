@@ -728,7 +728,7 @@ export default function RoomPage() {
                                         <span className="chat-system-text">{msg.content}</span>
                                     ) : (
                                         <>
-                                            <span className="chat-author">{msg.username}</span>
+                                            <span className="chat-author" style={{ color: `hsl(${(msg.username?.charCodeAt(0) * 47) % 360}, 65%, 65%)` }}>{msg.username}</span>
                                             <span className="chat-text">{msg.content}</span>
                                         </>
                                     )}

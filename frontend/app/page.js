@@ -62,13 +62,14 @@ export default function Home() {
     resize();
     window.addEventListener("resize", resize);
 
-    const particles = Array.from({ length: 60 }, () => ({
+    const particles = Array.from({ length: 70 }, () => ({
       x: Math.random() * canvas.width,
       y: Math.random() * canvas.height,
-      vx: (Math.random() - 0.5) * 0.4,
-      vy: (Math.random() - 0.5) * 0.4,
+      vx: (Math.random() - 0.5) * 0.35,
+      vy: (Math.random() - 0.5) * 0.35,
       r: Math.random() * 2 + 0.5,
-      alpha: Math.random() * 0.3 + 0.1,
+      alpha: Math.random() * 0.25 + 0.08,
+      hue: Math.random() > 0.5 ? 235 : 170,
     }));
 
     function frame() {
@@ -84,7 +85,7 @@ export default function Home() {
 
         ctx.beginPath();
         ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
-        ctx.fillStyle = `rgba(124, 92, 252, ${p.alpha})`;
+        ctx.fillStyle = p.hue === 235 ? `rgba(88, 101, 242, ${p.alpha})` : `rgba(0, 212, 170, ${p.alpha * 0.7})`;
         ctx.fill();
       });
 
@@ -97,7 +98,7 @@ export default function Home() {
             ctx.beginPath();
             ctx.moveTo(particles[i].x, particles[i].y);
             ctx.lineTo(particles[j].x, particles[j].y);
-            ctx.strokeStyle = `rgba(124, 92, 252, ${0.06 * (1 - dist / 150)})`;
+            ctx.strokeStyle = `rgba(88, 101, 242, ${0.05 * (1 - dist / 150)})`;
             ctx.lineWidth = 0.5;
             ctx.stroke();
           }
@@ -273,19 +274,19 @@ export default function Home() {
             </div>
             <div className="hero-preview-chat">
               <div className="hero-preview-msg">
-                <div className="hero-preview-msg-user">Alex</div>
+                <div className="hero-preview-msg-user" style={{ color: '#5865f2' }}>Alex</div>
                 <div className="hero-preview-msg-text">This part is incredible!</div>
               </div>
               <div className="hero-preview-msg">
-                <div className="hero-preview-msg-user" style={{ color: "var(--accent-secondary)" }}>Sam</div>
+                <div className="hero-preview-msg-user" style={{ color: '#23a559' }}>Sam</div>
                 <div className="hero-preview-msg-text">Wait for the drop at 2:34</div>
               </div>
               <div className="hero-preview-msg">
-                <div className="hero-preview-msg-user" style={{ color: "#e879f9" }}>Jordan</div>
+                <div className="hero-preview-msg-user" style={{ color: '#eb459e' }}>Jordan</div>
                 <div className="hero-preview-msg-text">This is way better than counting down!</div>
               </div>
               <div className="hero-preview-msg">
-                <div className="hero-preview-msg-user" style={{ color: "#fc5c8c" }}>Maya</div>
+                <div className="hero-preview-msg-user" style={{ color: '#f0b232' }}>Maya</div>
                 <div className="hero-preview-msg-text">Can we rewind a bit?</div>
               </div>
               <div className="hero-preview-typing">

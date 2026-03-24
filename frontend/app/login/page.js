@@ -56,7 +56,11 @@ export default function LoginPage() {
     return (
         <div className="auth-page">
             <div className="auth-card">
-                <div className="auth-card-icon">🔑</div>
+                <div className="auth-card-icon">
+                    <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" style={{ color: '#5865f2' }}>
+                        <rect x="3" y="11" width="18" height="11" rx="2" ry="2" /><path d="M7 11V7a5 5 0 0 1 10 0v4" />
+                    </svg>
+                </div>
                 <h1>Welcome Back</h1>
                 <p className="auth-subtitle">Log in to your SyncRoom account</p>
 
