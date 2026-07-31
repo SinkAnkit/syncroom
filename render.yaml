@@ -12,7 +12,7 @@ services:
       - key: DATABASE_URL
         fromDatabase:
           name: syncroom-db
-          property: connectionURI
+          property: connectionString
     rootDir: backend
 
 databases:
