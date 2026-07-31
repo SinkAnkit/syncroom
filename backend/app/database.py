@@ -40,6 +40,8 @@ async def init_db():
         for col_name, col_def_pg, col_def_sqlite in [
             ("is_public", "BOOLEAN DEFAULT TRUE", "BOOLEAN DEFAULT 1"),
             ("viewer_count", "INTEGER DEFAULT 0", "INTEGER DEFAULT 0"),
+            ("mode", "VARCHAR(20) DEFAULT 'youtube'", "VARCHAR(20) DEFAULT 'youtube'"),
+            ("upload_filename", "TEXT DEFAULT NULL", "TEXT DEFAULT NULL"),
         ]:
             try:
                 is_pg = "postgresql" in DATABASE_URL
@@ -48,3 +50,11 @@ async def init_db():
                 logger.info(f"Added column rooms.{col_name}")
             except Exception:
                 pass  # Column already exists
+
+        # Make video_url nullable (was NOT NULL in old schema)
+        try:
+            if "postgresql" in DATABASE_URL:
+                await conn.execute(text("ALTER TABLE rooms ALTER COLUMN video_url DROP NOT NULL"))
+                logger.info("Made rooms.video_url nullable")
+        except Exception:
+            pass
