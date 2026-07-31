@@ -91,6 +91,8 @@ export default function RoomPage() {
     const screenVideoRef = useRef(null);
     const remoteScreenRef = useRef(null);
     const screenPeers = useRef({});
+    const screenStreamRef = useRef(null);
+    const isScreenSharingRef = useRef(false);
     const chatEndRef = useRef(null);
     const chatContainerRef = useRef(null);
     const ignoreNextEvent = useRef(false);
@@ -361,8 +363,8 @@ export default function RoomPage() {
 
                 case "screen:request": {
                     // Someone is requesting our screen share stream
-                    if (isScreenSharing && screenStream) {
-                        createScreenPeer(msg.from, screenStream, true);
+                    if (isScreenSharingRef.current && screenStreamRef.current) {
+                        createScreenPeer(msg.from, screenStreamRef.current, true);
                     }
                     break;
                 }
@@ -631,6 +633,8 @@ export default function RoomPage() {
             setScreenStream(stream);
             setIsScreenSharing(true);
             setScreenSharer(username);
+            screenStreamRef.current = stream;
+            isScreenSharingRef.current = true;
             sendWsMessage({ type: "screen:start", username });
 
             // Create peer connections to all participants for screen share
@@ -648,14 +652,16 @@ export default function RoomPage() {
     }
 
     function stopScreenShare() {
-        if (screenStream) {
-            screenStream.getTracks().forEach(t => t.stop());
+        if (screenStreamRef.current) {
+            screenStreamRef.current.getTracks().forEach(t => t.stop());
         }
         Object.values(screenPeers.current).forEach(pc => pc.close());
         screenPeers.current = {};
         setScreenStream(null);
         setIsScreenSharing(false);
         setScreenSharer(null);
+        screenStreamRef.current = null;
+        isScreenSharingRef.current = false;
         sendWsMessage({ type: "screen:stop", username });
     }
 
