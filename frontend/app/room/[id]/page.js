@@ -175,7 +175,7 @@ export default function RoomPage() {
 
         playerRef.current = new window.YT.Player("yt-player", {
             videoId,
-            playerVars: { autoplay: 1, controls: 1, modestbranding: 1, rel: 0 },
+            playerVars: { autoplay: 1, controls: canControlVideo ? 1 : 0, modestbranding: 1, rel: 0, disablekb: canControlVideo ? 0 : 1 },
             events: {
                 onReady: (e) => {
                     playerReady.current = true;
@@ -766,10 +766,16 @@ export default function RoomPage() {
                         <div id="yt-player" />
                     </div>
 
-                    {/* Volume Control */}
+                    {/* Video Controls */}
                     <div className="video-controls-bar">
                         <div className="volume-control">
-                            <span className="volume-icon">{volume === 0 ? "muted" : "vol"}</span>
+                            <svg className="volume-icon-svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                {volume === 0 ? (
+                                    <><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" /><line x1="23" y1="9" x2="17" y2="15" /><line x1="17" y1="9" x2="23" y2="15" /></>
+                                ) : (
+                                    <><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" /><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.08" /></>
+                                )}
+                            </svg>
                             <input
                                 type="range"
                                 min="0"
@@ -777,9 +783,7 @@ export default function RoomPage() {
                                 value={volume}
                                 onChange={(e) => handleVolumeChange(e.target.value)}
                                 className="volume-slider"
-                                disabled={!canControlVideo}
                             />
-                            <span className="volume-value">{volume}%</span>
                         </div>
                         <div className="voice-controls">
                             <button className={`voice-btn ${voiceActive ? (voiceMuted ? 'voice-muted' : 'voice-live') : ''}`} onClick={voiceActive ? toggleMic : toggleVoice} title={voiceActive ? (voiceMuted ? 'Unmute' : 'Mute') : 'Join Voice'}>
@@ -800,11 +804,6 @@ export default function RoomPage() {
                                     Leave
                                 </button>
                             )}
-                        </div>
-                        <div className="role-indicator">
-                            {myRole === "admin" && <span className="role-tag role-tag-admin">ADMIN</span>}
-                            {myRole === "mod" && <span className="role-tag role-tag-mod">MOD</span>}
-                            {myRole === "member" && <span className="role-tag role-tag-member">MEMBER</span>}
                         </div>
                     </div>
                 </div>
