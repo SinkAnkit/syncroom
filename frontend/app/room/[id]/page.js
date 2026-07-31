@@ -586,17 +586,11 @@ export default function RoomPage() {
         }
     }
 
-    // PeerJS config with STUN + free TURN servers for NAT traversal
+    // PeerJS config with STUN + TURN for NAT traversal
     const peerConfig = {
         config: {
             iceServers: [
                 { urls: "stun:stun.l.google.com:19302" },
-                { urls: "stun:stun1.l.google.com:19302" },
-                {
-                    urls: "turn:openrelay.metered.ca:80",
-                    username: "openrelayproject",
-                    credential: "openrelayproject",
-                },
                 {
                     urls: "turn:openrelay.metered.ca:443",
                     username: "openrelayproject",
