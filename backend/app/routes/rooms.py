@@ -1,13 +1,19 @@
 from typing import Optional
-from fastapi import APIRouter, Depends, HTTPException, status, Query
+from fastapi import APIRouter, Depends, HTTPException, status, Query, UploadFile, File
+from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, desc
 from app.database import get_db
 from app.models import Room, User
 from app.schemas import CreateRoomRequest, RoomResponse
 from app.auth import get_current_user
+import os
+import uuid
 
 router = APIRouter(prefix="/api/rooms", tags=["rooms"])
+
+UPLOAD_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "uploads")
+os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 
 @router.post("", response_model=RoomResponse)
@@ -21,6 +27,7 @@ async def create_room(
         name=req.name,
         video_url=req.video_url,
         host_name=req.host_name,
+        mode=req.mode,
         creator_id=user.id if user else None,
         is_public=req.is_public,
     )
@@ -103,3 +110,45 @@ async def get_room_messages(
     )
     messages = result.scalars().all()
     return [m.to_dict() for m in messages]
+
+
+@router.post("/{room_id}/upload")
+async def upload_video(
+    room_id: str,
+    file: UploadFile = File(...),
+    db: AsyncSession = Depends(get_db),
+):
+    """Upload a video file for a room in upload mode."""
+    result = await db.execute(select(Room).where(Room.id == room_id))
+    room = result.scalar_one_or_none()
+    if not room:
+        raise HTTPException(status_code=404, detail="Room not found")
+    if room.mode != "upload":
+        raise HTTPException(status_code=400, detail="Room is not in upload mode")
+
+    ext = os.path.splitext(file.filename or "video.mp4")[1] or ".mp4"
+    safe_name = f"{room_id}_{uuid.uuid4().hex[:8]}{ext}"
+    filepath = os.path.join(UPLOAD_DIR, safe_name)
+
+    with open(filepath, "wb") as f:
+        while chunk := await file.read(1024 * 1024):
+            f.write(chunk)
+
+    room.upload_filename = safe_name
+    await db.commit()
+    return {"filename": safe_name, "url": f"/api/rooms/{room_id}/video"}
+
+
+@router.get("/{room_id}/video")
+async def serve_video(room_id: str, db: AsyncSession = Depends(get_db)):
+    """Serve uploaded video with range support for streaming."""
+    result = await db.execute(select(Room).where(Room.id == room_id))
+    room = result.scalar_one_or_none()
+    if not room or not room.upload_filename:
+        raise HTTPException(status_code=404, detail="No video found")
+
+    filepath = os.path.join(UPLOAD_DIR, room.upload_filename)
+    if not os.path.exists(filepath):
+        raise HTTPException(status_code=404, detail="Video file missing")
+
+    return FileResponse(filepath, media_type="video/mp4")

@@ -36,12 +36,14 @@ class Room(Base):
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: secrets.token_hex(4))
     name: Mapped[str] = mapped_column(String(100), nullable=False)
-    video_url: Mapped[str] = mapped_column(Text, nullable=False)
+    video_url: Mapped[str] = mapped_column(Text, nullable=True, default="")
     host_name: Mapped[str] = mapped_column(String(50), nullable=False)
+    mode: Mapped[str] = mapped_column(String(20), nullable=False, default="youtube")
     creator_id: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     is_public: Mapped[bool] = mapped_column(Boolean, default=True)
     viewer_count: Mapped[int] = mapped_column(Integer, default=0)
+    upload_filename: Mapped[str] = mapped_column(Text, nullable=True, default=None)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )
@@ -53,12 +55,14 @@ class Room(Base):
         return {
             "id": self.id,
             "name": self.name,
-            "video_url": self.video_url,
+            "video_url": self.video_url or "",
             "host_name": self.host_name,
+            "mode": self.mode,
             "creator_id": self.creator_id,
             "is_active": self.is_active,
             "is_public": self.is_public,
             "viewer_count": self.viewer_count,
+            "upload_filename": self.upload_filename,
             "created_at": self.created_at.isoformat(),
         }
 

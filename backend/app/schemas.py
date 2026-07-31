@@ -57,8 +57,9 @@ class TokenResponse(BaseModel):
 
 class CreateRoomRequest(BaseModel):
     name: str
-    video_url: str
+    video_url: str = ""
     host_name: str
+    mode: str = "youtube"
     is_public: bool = True
 
     @field_validator("name")
@@ -69,13 +70,18 @@ class CreateRoomRequest(BaseModel):
             raise ValueError("Room name must be between 1 and 100 characters")
         return v
 
+    @field_validator("mode")
+    @classmethod
+    def validate_mode(cls, v: str) -> str:
+        v = v.strip().lower()
+        if v not in ("youtube", "screenshare", "upload"):
+            raise ValueError("Mode must be youtube, screenshare, or upload")
+        return v
+
     @field_validator("video_url")
     @classmethod
     def validate_video_url(cls, v: str) -> str:
-        v = v.strip()
-        if not v:
-            raise ValueError("Video URL is required")
-        return v
+        return v.strip()
 
     @field_validator("host_name")
     @classmethod
@@ -89,12 +95,14 @@ class CreateRoomRequest(BaseModel):
 class RoomResponse(BaseModel):
     id: str
     name: str
-    video_url: str
+    video_url: str = ""
     host_name: str
+    mode: str = "youtube"
     creator_id: Optional[str] = None
     is_active: bool
     is_public: bool = True
     viewer_count: int = 0
+    upload_filename: Optional[str] = None
     created_at: str
 
 

@@ -83,7 +83,7 @@ export default function Home() {
   const router = useRouter();
   const [showModal, setShowModal] = useState(false);
   const [showJoinModal, setShowJoinModal] = useState(false);
-  const [formData, setFormData] = useState({ name: "", video_url: "", host_name: "", is_public: true });
+  const [formData, setFormData] = useState({ name: "", video_url: "", host_name: "", mode: "youtube", is_public: true });
   const [joinData, setJoinData] = useState({ roomId: "", username: "" });
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
@@ -118,8 +118,11 @@ export default function Home() {
   const handleCreate = async (e) => {
     e.preventDefault();
     setError("");
-    if (!formData.name.trim() || !formData.video_url.trim() || !formData.host_name.trim()) {
-      setError("All fields are required"); return;
+    if (!formData.name.trim() || !formData.host_name.trim()) {
+      setError("Name and host name are required"); return;
+    }
+    if (formData.mode === "youtube" && !formData.video_url.trim()) {
+      setError("YouTube URL is required for YouTube Sync mode"); return;
     }
     setLoading(true);
     try {
@@ -333,10 +336,39 @@ export default function Home() {
                   onChange={(e) => setFormData({ ...formData, name: e.target.value })} maxLength={100} />
               </div>
               <div className="form-group">
-                <label>YouTube Video URL</label>
-                <input type="text" placeholder="https://www.youtube.com/watch?v=..."
-                  value={formData.video_url} onChange={(e) => setFormData({ ...formData, video_url: e.target.value })} />
+                <label>Stream Mode</label>
+                <div className="mode-toggle">
+                  <button type="button" className={`mode-option ${formData.mode === "youtube" ? "active" : ""}`}
+                    onClick={() => setFormData({ ...formData, mode: "youtube" })}>
+                    <PlayIcon /> YouTube Sync
+                  </button>
+                  <button type="button" className={`mode-option ${formData.mode === "screenshare" ? "active" : ""}`}
+                    onClick={() => setFormData({ ...formData, mode: "screenshare" })}>
+                    <GlobeIcon /> Screen Share
+                  </button>
+                  <button type="button" className={`mode-option ${formData.mode === "upload" ? "active" : ""}`}
+                    onClick={() => setFormData({ ...formData, mode: "upload" })}>
+                    <BoltIcon /> Upload Video
+                  </button>
+                </div>
               </div>
+              {formData.mode === "youtube" && (
+                <div className="form-group">
+                  <label>YouTube Video URL</label>
+                  <input type="text" placeholder="https://www.youtube.com/watch?v=..."
+                    value={formData.video_url} onChange={(e) => setFormData({ ...formData, video_url: e.target.value })} />
+                </div>
+              )}
+              {formData.mode === "screenshare" && (
+                <div className="form-group">
+                  <p className="mode-hint">You will share your screen after creating the room. All participants will see your stream.</p>
+                </div>
+              )}
+              {formData.mode === "upload" && (
+                <div className="form-group">
+                  <p className="mode-hint">Upload your video file after creating the room. Everyone will watch it in sync.</p>
+                </div>
+              )}
               <div className="form-group">
                 <label>Room Visibility</label>
                 <div className="visibility-toggle">
