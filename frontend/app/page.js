@@ -228,11 +228,6 @@ export default function Home() {
 
       {/* Hero */}
       <section className="hero">
-        <div className="hero-badge">
-          <span className="hero-badge-dot" />
-          Real-time synchronized watching
-        </div>
-
         <h1>
           Watch Videos<br />
           <span className="hero-gradient-text">Together in Sync</span>

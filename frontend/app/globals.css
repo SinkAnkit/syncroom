@@ -141,30 +141,6 @@ textarea {
   z-index: -2;
 }
 
-.landing-bg::before {
-  content: '';
-  position: absolute;
-  top: -30%;
-  left: 40%;
-  width: 1100px;
-  height: 1100px;
-  background: radial-gradient(circle, rgba(88, 101, 242, 0.1) 0%, transparent 60%);
-  pointer-events: none;
-  animation: floatBlob1 20s ease-in-out infinite;
-}
-
-.landing-bg::after {
-  content: '';
-  position: absolute;
-  bottom: -20%;
-  right: 10%;
-  width: 800px;
-  height: 800px;
-  background: radial-gradient(circle, rgba(235, 69, 158, 0.06) 0%, transparent 60%);
-  pointer-events: none;
-  animation: floatBlob2 25s ease-in-out infinite;
-}
-
 /* Navbar */
 .navbar {
   position: fixed;
@@ -346,8 +322,6 @@ textarea {
   height: 8px;
   border-radius: 50%;
   background: var(--green);
-  box-shadow: 0 0 10px var(--green-glow);
-  animation: pulseGlow 2s infinite;
 }
 
 .hero h1 {
@@ -360,12 +334,7 @@ textarea {
 }
 
 .hero-gradient-text {
-  background: var(--gradient-hero);
-  -webkit-background-clip: text;
-  background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-size: 200% 200%;
-  animation: gradientShift 8s ease infinite;
+  color: var(--blurple);
 }
 
 .hero p {
@@ -558,7 +527,7 @@ textarea {
   width: 35%;
   height: 100%;
   border-radius: 2px;
-  background: linear-gradient(90deg, var(--blurple), var(--fuchsia));
+  background: var(--blurple);
   animation: progressAnim 8s ease-in-out infinite;
 }
 
@@ -873,7 +842,6 @@ textarea {
   font-size: 1.25rem;
   color: white;
   margin: 0 auto 20px;
-  box-shadow: 0 0 30px var(--blurple-glow);
 }
 
 .step h3 {
@@ -1008,8 +976,6 @@ textarea {
   height: 7px;
   border-radius: 50%;
   background: var(--green);
-  box-shadow: 0 0 8px var(--green-glow);
-  animation: pulseGlow 2s ease-in-out infinite;
 }
 
 /* Modal */
@@ -1033,7 +999,7 @@ textarea {
   width: 100%;
   max-width: 440px;
   box-shadow: var(--shadow-lg), 0 0 60px rgba(88, 101, 242, 0.05);
-  animation: modalIn 0.25s var(--ease-spring);
+  animation: modalIn 0.2s var(--ease-out);
   backdrop-filter: blur(20px);
 }
 
@@ -2145,7 +2111,7 @@ textarea {
   background: var(--blurple-soft);
 }
 
-   ANIMATIONS
+/* Animations */
 
 @keyframes fadeIn {
   from {
@@ -2264,55 +2230,6 @@ textarea {
   }
 }
 
-@keyframes gradientShift {
-  0% {
-    background-position: 0% 50%;
-  }
-
-  50% {
-    background-position: 100% 50%;
-  }
-
-  100% {
-    background-position: 0% 50%;
-  }
-}
-
-@keyframes floatBlob1 {
-
-  0%,
-  100% {
-    transform: translate(0, 0);
-  }
-
-  25% {
-    transform: translate(40px, -30px);
-  }
-
-  50% {
-    transform: translate(-20px, 40px);
-  }
-
-  75% {
-    transform: translate(30px, 20px);
-  }
-}
-
-@keyframes floatBlob2 {
-
-  0%,
-  100% {
-    transform: translate(0, 0);
-  }
-
-  33% {
-    transform: translate(-40px, 30px);
-  }
-
-  66% {
-    transform: translate(30px, -40px);
-  }
-}
 
 /* Responsive */
 
