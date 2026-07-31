@@ -586,6 +586,31 @@ export default function RoomPage() {
         }
     }
 
+    // PeerJS config with STUN + free TURN servers for NAT traversal
+    const peerConfig = {
+        config: {
+            iceServers: [
+                { urls: "stun:stun.l.google.com:19302" },
+                { urls: "stun:stun1.l.google.com:19302" },
+                {
+                    urls: "turn:openrelay.metered.ca:80",
+                    username: "openrelayproject",
+                    credential: "openrelayproject",
+                },
+                {
+                    urls: "turn:openrelay.metered.ca:443",
+                    username: "openrelayproject",
+                    credential: "openrelayproject",
+                },
+                {
+                    urls: "turn:openrelay.metered.ca:443?transport=tcp",
+                    username: "openrelayproject",
+                    credential: "openrelayproject",
+                },
+            ]
+        }
+    };
+
     /* Screen Share - PeerJS + HTTP polling (bypasses broken WS broadcast) */
     async function startScreenShare() {
         try {
@@ -597,7 +622,7 @@ export default function RoomPage() {
             isScreenSharingRef.current = true;
 
             const { Peer } = await import('peerjs');
-            const peer = new Peer();
+            const peer = new Peer(peerConfig);
             screenPeers.current._peer = peer;
 
             peer.on('open', async (id) => {
@@ -671,7 +696,7 @@ export default function RoomPage() {
     async function connectToScreenShare(peerId) {
         try {
             const { Peer } = await import('peerjs');
-            const peer = new Peer();
+            const peer = new Peer(peerConfig);
             screenPeers.current._peer = peer;
 
             peer.on('open', () => {
