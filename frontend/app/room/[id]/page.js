@@ -6,13 +6,13 @@ import { useParams, useRouter } from "next/navigation";
 function getApiUrl() {
     if (typeof window === "undefined") return "http://localhost:8000";
     if (window.location.hostname === "localhost") return "http://localhost:8000";
-    return "https://syncroom-joth.onrender.com";
+    return "https://syncroom-api.onrender.com";
 }
 
 function getWsUrl() {
     if (typeof window === "undefined") return "ws://localhost:8000";
     if (window.location.hostname === "localhost") return "ws://localhost:8000";
-    return "wss://syncroom-joth.onrender.com";
+    return "wss://syncroom-api.onrender.com";
 }
 
 /* ── Utilities ─────────────────────────────────────── */

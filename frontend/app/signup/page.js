@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 function getApiUrl() {
     if (typeof window === "undefined") return "http://localhost:8000";
     if (window.location.hostname === "localhost") return "http://localhost:8000";
-    return "https://syncroom-joth.onrender.com";
+    return "https://syncroom-api.onrender.com";
 }
 
 export default function SignupPage() {
