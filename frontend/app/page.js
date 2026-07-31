@@ -13,10 +13,7 @@ function getApiUrl() {
 
 const SyncRoomLogo = () => (
   <div className="logo-icon">
-    <svg width="28" height="28" viewBox="0 0 28 28" fill="none">
-      <rect width="28" height="28" rx="6" fill="#5865f2" />
-      <path d="M9 11 L18 14 L9 17Z" fill="#fff" />
-    </svg>
+    <img src="/logo.png" alt="SyncRoom" width={28} height={28} style={{ borderRadius: '6px' }} />
   </div>
 );
 
