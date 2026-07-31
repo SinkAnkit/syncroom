@@ -244,9 +244,6 @@ export default function Home() {
                 <h3>{f.title}</h3>
                 <p>{f.desc}</p>
               </div>
-              <div className="feature-card-footer">
-                <span className="feature-card-link">Learn more <ArrowRight /></span>
-              </div>
             </div>
           ))}
         </div>
