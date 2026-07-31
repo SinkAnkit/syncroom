@@ -221,6 +221,10 @@ export default function Home() {
           </button>
         </div>
 
+        <div className="hero-image">
+          <img src="/hero.png" alt="SyncRoom in action" />
+        </div>
+
       </section>
 
       {/* Features */}
