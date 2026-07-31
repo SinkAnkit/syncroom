@@ -323,51 +323,29 @@ export default function RoomPage() {
 
                 case "screen:start":
                     setScreenSharer(msg.username);
-                    if (msg.username !== username) {
+                    if (msg.username !== username && msg.peerId) {
                         showToast(`${msg.username} started screen sharing`);
-                        // Request the sharer to send us their stream
-                        sendWsMessage({ type: "screen:request", target: msg.username });
+                        connectToScreenShare(msg.peerId);
                     }
                     break;
 
                 case "screen:stop":
                     setScreenSharer(null);
                     setRemoteScreenStream(null);
-                    Object.values(screenPeers.current).forEach(pc => pc.close());
-                    screenPeers.current = {};
+                    if (screenPeers.current._peer && !isScreenSharingRef.current) {
+                        screenPeers.current._peer.destroy();
+                        screenPeers.current = {};
+                    }
                     if (msg.username !== username) {
                         showToast(`${msg.username} stopped sharing`);
                     }
                     break;
 
-                case "screen:offer": {
-                    const pc = createScreenPeer(msg.from, null, false);
-                    await pc.setRemoteDescription(new RTCSessionDescription(msg.sdp));
-                    const answer = await pc.createAnswer();
-                    await pc.setLocalDescription(answer);
-                    sendWsMessage({ type: "screen:answer", target: msg.from, sdp: answer });
+                case "screen:offer":
+                case "screen:answer":
+                case "screen:ice":
+                case "screen:request":
                     break;
-                }
-
-                case "screen:answer": {
-                    const pc = screenPeers.current[msg.from];
-                    if (pc) await pc.setRemoteDescription(new RTCSessionDescription(msg.sdp));
-                    break;
-                }
-
-                case "screen:ice": {
-                    const pc = screenPeers.current[msg.from];
-                    if (pc) await pc.addIceCandidate(new RTCIceCandidate(msg.candidate));
-                    break;
-                }
-
-                case "screen:request": {
-                    // Someone is requesting our screen share stream
-                    if (isScreenSharingRef.current && screenStreamRef.current) {
-                        createScreenPeer(msg.from, screenStreamRef.current, true);
-                    }
-                    break;
-                }
 
                 case "video:state":
                     if (playerRef.current && playerReady.current) {
@@ -626,7 +604,7 @@ export default function RoomPage() {
         }
     }
 
-    /* Screen Share */
+    /* Screen Share - uses PeerJS for reliable WebRTC */
     async function startScreenShare() {
         try {
             const stream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
@@ -635,14 +613,22 @@ export default function RoomPage() {
             setScreenSharer(username);
             screenStreamRef.current = stream;
             isScreenSharingRef.current = true;
-            sendWsMessage({ type: "screen:start", username });
 
-            // Create peer connections to all participants for screen share
-            participants.forEach(p => {
-                const pName = typeof p === "string" ? p : p?.username;
-                if (pName && pName !== username) {
-                    createScreenPeer(pName, stream, true);
-                }
+            // Create PeerJS peer and wait for it to be ready
+            const { Peer } = await import('peerjs');
+            const peerId = `syncroom-${roomId}-${Date.now()}`;
+            const peer = new Peer(peerId);
+            screenPeers.current._peer = peer;
+            screenPeers.current._calls = [];
+
+            peer.on('open', (id) => {
+                // Broadcast our peer ID to all room members via WebSocket
+                sendWsMessage({ type: "screen:start", username, peerId: id });
+            });
+
+            peer.on('call', (call) => {
+                // Answer incoming calls with our stream (for late joiners who call us)
+                call.answer(stream);
             });
 
             stream.getVideoTracks()[0].onended = () => stopScreenShare();
@@ -655,50 +641,46 @@ export default function RoomPage() {
         if (screenStreamRef.current) {
             screenStreamRef.current.getTracks().forEach(t => t.stop());
         }
-        Object.values(screenPeers.current).forEach(pc => pc.close());
+        if (screenPeers.current._peer) {
+            screenPeers.current._peer.destroy();
+        }
         screenPeers.current = {};
         setScreenStream(null);
         setIsScreenSharing(false);
         setScreenSharer(null);
+        setRemoteScreenStream(null);
         screenStreamRef.current = null;
         isScreenSharingRef.current = false;
         sendWsMessage({ type: "screen:stop", username });
     }
 
-    function createScreenPeer(targetUsername, stream, isInitiator) {
-        const pc = new RTCPeerConnection({
-            iceServers: [
-                { urls: "stun:stun.l.google.com:19302" },
-                { urls: "stun:stun1.l.google.com:19302" },
-            ]
-        });
-        screenPeers.current[targetUsername] = pc;
+    async function connectToScreenShare(peerId) {
+        try {
+            const { Peer } = await import('peerjs');
+            const myPeerId = `syncroom-viewer-${roomId}-${Date.now()}`;
+            const peer = new Peer(myPeerId);
+            screenPeers.current._peer = peer;
 
-        pc.onicecandidate = (e) => {
-            if (e.candidate) {
-                sendWsMessage({ type: "screen:ice", target: targetUsername, candidate: e.candidate });
-            }
-        };
-
-        pc.ontrack = (e) => {
-            setRemoteScreenStream(e.streams[0]);
-        };
-
-        if (stream) {
-            stream.getTracks().forEach(track => {
-                pc.addTrack(track, stream);
+            peer.on('open', () => {
+                // Call the sharer to get their stream
+                const call = peer.call(peerId, new MediaStream()); // empty stream, we just want to receive
+                call.on('stream', (remoteStream) => {
+                    setRemoteScreenStream(remoteStream);
+                });
+                call.on('error', () => {
+                    setToast("Failed to connect to screen share");
+                });
             });
-        }
 
-        if (isInitiator) {
-            pc.createOffer().then(offer => {
-                pc.setLocalDescription(offer);
-                sendWsMessage({ type: "screen:offer", target: targetUsername, sdp: offer });
+            peer.on('error', () => {
+                setToast("Connection failed");
             });
+        } catch (e) {
+            setToast("Failed to connect");
         }
-
-        return pc;
     }
+
+    function createScreenPeer() { /* unused, kept for compat */ }
 
     /* Upload Video */
     async function handleFileUpload(e) {
