@@ -83,12 +83,14 @@ export default function RoomPage() {
     const [remoteScreenStream, setRemoteScreenStream] = useState(null);
     const [uploadProgress, setUploadProgress] = useState(null);
     const [uploadedVideoUrl, setUploadedVideoUrl] = useState(null);
+    const [screenSharer, setScreenSharer] = useState(null);
 
     const wsRef = useRef(null);
     const playerRef = useRef(null);
     const uploadVideoRef = useRef(null);
     const screenVideoRef = useRef(null);
     const remoteScreenRef = useRef(null);
+    const screenPeers = useRef({});
     const chatEndRef = useRef(null);
     const chatContainerRef = useRef(null);
     const ignoreNextEvent = useRef(false);
@@ -182,6 +184,13 @@ export default function RoomPage() {
             screenVideoRef.current.srcObject = screenStream;
         }
     }, [screenStream]);
+
+    // Attach remote screen stream to video element
+    useEffect(() => {
+        if (remoteScreenStream && remoteScreenRef.current) {
+            remoteScreenRef.current.srcObject = remoteScreenStream;
+        }
+    }, [remoteScreenStream]);
 
     // Set initial upload video URL from room data
     useEffect(() => {
@@ -311,17 +320,42 @@ export default function RoomPage() {
                     break;
 
                 case "screen:start":
+                    setScreenSharer(msg.username);
                     if (msg.username !== username) {
                         showToast(`${msg.username} started screen sharing`);
                     }
                     break;
 
                 case "screen:stop":
+                    setScreenSharer(null);
+                    setRemoteScreenStream(null);
+                    Object.values(screenPeers.current).forEach(pc => pc.close());
+                    screenPeers.current = {};
                     if (msg.username !== username) {
-                        setRemoteScreenStream(null);
                         showToast(`${msg.username} stopped sharing`);
                     }
                     break;
+
+                case "screen:offer": {
+                    const pc = createScreenPeer(msg.from, null, false);
+                    await pc.setRemoteDescription(new RTCSessionDescription(msg.sdp));
+                    const answer = await pc.createAnswer();
+                    await pc.setLocalDescription(answer);
+                    sendWsMessage({ type: "screen:answer", target: msg.from, sdp: answer });
+                    break;
+                }
+
+                case "screen:answer": {
+                    const pc = screenPeers.current[msg.from];
+                    if (pc) await pc.setRemoteDescription(new RTCSessionDescription(msg.sdp));
+                    break;
+                }
+
+                case "screen:ice": {
+                    const pc = screenPeers.current[msg.from];
+                    if (pc) await pc.addIceCandidate(new RTCIceCandidate(msg.candidate));
+                    break;
+                }
 
                 case "video:state":
                     if (playerRef.current && playerReady.current) {
@@ -586,10 +620,17 @@ export default function RoomPage() {
             const stream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
             setScreenStream(stream);
             setIsScreenSharing(true);
-            if (screenVideoRef.current) {
-                screenVideoRef.current.srcObject = stream;
-            }
+            setScreenSharer(username);
             sendWsMessage({ type: "screen:start", username });
+
+            // Create peer connections to all participants for screen share
+            participants.forEach(p => {
+                const pName = typeof p === "string" ? p : p?.username;
+                if (pName && pName !== username) {
+                    createScreenPeer(pName, stream, true);
+                }
+            });
+
             stream.getVideoTracks()[0].onended = () => stopScreenShare();
         } catch (e) {
             setToast("Screen share cancelled");
@@ -600,9 +641,47 @@ export default function RoomPage() {
         if (screenStream) {
             screenStream.getTracks().forEach(t => t.stop());
         }
+        Object.values(screenPeers.current).forEach(pc => pc.close());
+        screenPeers.current = {};
         setScreenStream(null);
         setIsScreenSharing(false);
+        setScreenSharer(null);
         sendWsMessage({ type: "screen:stop", username });
+    }
+
+    function createScreenPeer(targetUsername, stream, isInitiator) {
+        const pc = new RTCPeerConnection({
+            iceServers: [
+                { urls: "stun:stun.l.google.com:19302" },
+                { urls: "stun:stun1.l.google.com:19302" },
+            ]
+        });
+        screenPeers.current[targetUsername] = pc;
+
+        pc.onicecandidate = (e) => {
+            if (e.candidate) {
+                sendWsMessage({ type: "screen:ice", target: targetUsername, candidate: e.candidate });
+            }
+        };
+
+        pc.ontrack = (e) => {
+            setRemoteScreenStream(e.streams[0]);
+        };
+
+        if (stream) {
+            stream.getTracks().forEach(track => {
+                pc.addTrack(track, stream);
+            });
+        }
+
+        if (isInitiator) {
+            pc.createOffer().then(offer => {
+                pc.setLocalDescription(offer);
+                sendWsMessage({ type: "screen:offer", target: targetUsername, sdp: offer });
+            });
+        }
+
+        return pc;
     }
 
     /* Upload Video */
@@ -909,10 +988,12 @@ export default function RoomPage() {
                                     <video ref={remoteScreenRef} autoPlay className="screenshare-video" />
                                 ) : (
                                     <div className="screenshare-placeholder">
-                                        {canControlVideo ? (
+                                        {canControlVideo && !screenSharer ? (
                                             <button className="btn-primary" onClick={startScreenShare}>
                                                 Share Your Screen
                                             </button>
+                                        ) : screenSharer ? (
+                                            <p>Connecting to {screenSharer}'s screen...</p>
                                         ) : (
                                             <p>Waiting for host to start screen sharing...</p>
                                         )}

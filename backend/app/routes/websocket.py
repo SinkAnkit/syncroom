@@ -433,6 +433,47 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str, username: str =
                     "forced": True,
                 })
 
+            # ── Screen Share Signaling ──────────────
+
+            elif msg_type == "screen:start":
+                await manager.broadcast(room_id, {
+                    "type": "screen:start",
+                    "username": username,
+                }, exclude=username)
+
+            elif msg_type == "screen:stop":
+                await manager.broadcast(room_id, {
+                    "type": "screen:stop",
+                    "username": username,
+                }, exclude=username)
+
+            elif msg_type == "screen:offer":
+                target = message.get("target", "")
+                if target:
+                    await manager.send_to(room_id, target, {
+                        "type": "screen:offer",
+                        "sdp": message.get("sdp"),
+                        "from": username,
+                    })
+
+            elif msg_type == "screen:answer":
+                target = message.get("target", "")
+                if target:
+                    await manager.send_to(room_id, target, {
+                        "type": "screen:answer",
+                        "sdp": message.get("sdp"),
+                        "from": username,
+                    })
+
+            elif msg_type == "screen:ice":
+                target = message.get("target", "")
+                if target:
+                    await manager.send_to(room_id, target, {
+                        "type": "screen:ice",
+                        "candidate": message.get("candidate"),
+                        "from": username,
+                    })
+
     except WebSocketDisconnect:
         pass
     except Exception as e:
