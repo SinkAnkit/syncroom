@@ -238,10 +238,15 @@ export default function Home() {
         </div>
         <div className="features-grid">
           {featureCards.map((f, i) => (
-            <div key={i} className="feature-card" style={{ animationDelay: `${i * 0.08}s` }}>
-              <div className={`feature-icon feature-icon-${f.color}`}>{f.icon}</div>
-              <h3>{f.title}</h3>
-              <p>{f.desc}</p>
+            <div key={i} className="feature-card">
+              <div className="feature-card-icon">{f.icon}</div>
+              <div className="feature-card-body">
+                <h3>{f.title}</h3>
+                <p>{f.desc}</p>
+              </div>
+              <div className="feature-card-footer">
+                <span className="feature-card-link">Learn more <ArrowRight /></span>
+              </div>
             </div>
           ))}
         </div>
@@ -287,7 +292,7 @@ export default function Home() {
               <SyncRoomLogo />
               <span>SyncRoom</span>
             </div>
-            <p className="footer-tagline">Watch videos together in perfect sync.<br />Built for friends, powered by WebSockets.</p>
+            <p className="footer-tagline">Sync your watch parties.</p>
           </div>
           <div className="footer-links-section">
             <div className="footer-col">
