@@ -323,6 +323,8 @@ export default function RoomPage() {
                     setScreenSharer(msg.username);
                     if (msg.username !== username) {
                         showToast(`${msg.username} started screen sharing`);
+                        // Request the sharer to send us their stream
+                        sendWsMessage({ type: "screen:request", target: msg.username });
                     }
                     break;
 
@@ -354,6 +356,14 @@ export default function RoomPage() {
                 case "screen:ice": {
                     const pc = screenPeers.current[msg.from];
                     if (pc) await pc.addIceCandidate(new RTCIceCandidate(msg.candidate));
+                    break;
+                }
+
+                case "screen:request": {
+                    // Someone is requesting our screen share stream
+                    if (isScreenSharing && screenStream) {
+                        createScreenPeer(msg.from, screenStream, true);
+                    }
                     break;
                 }
 

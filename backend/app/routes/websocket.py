@@ -172,6 +172,15 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str, username: str =
             "volume": state.get("volume", 80),
         })
 
+        # Send active screen share state if any
+        active_sharer = await redis_client.client.get(f"screen:{room_id}")
+        if active_sharer:
+            sharer_name = active_sharer if isinstance(active_sharer, str) else active_sharer.decode()
+            await manager.send_to(room_id, username, {
+                "type": "screen:start",
+                "username": sharer_name,
+            })
+
         # Listen for messages
         while True:
             data = await websocket.receive_text()
@@ -436,16 +445,18 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str, username: str =
             # ── Screen Share Signaling ──────────────
 
             elif msg_type == "screen:start":
+                await redis_client.client.set(f"screen:{room_id}", username)
                 await manager.broadcast(room_id, {
                     "type": "screen:start",
                     "username": username,
-                }, exclude=username)
+                })
 
             elif msg_type == "screen:stop":
+                await redis_client.client.delete(f"screen:{room_id}")
                 await manager.broadcast(room_id, {
                     "type": "screen:stop",
                     "username": username,
-                }, exclude=username)
+                })
 
             elif msg_type == "screen:offer":
                 target = message.get("target", "")
@@ -471,6 +482,14 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str, username: str =
                     await manager.send_to(room_id, target, {
                         "type": "screen:ice",
                         "candidate": message.get("candidate"),
+                        "from": username,
+                    })
+
+            elif msg_type == "screen:request":
+                target = message.get("target", "")
+                if target:
+                    await manager.send_to(room_id, target, {
+                        "type": "screen:request",
                         "from": username,
                     })
 
