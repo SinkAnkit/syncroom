@@ -341,14 +341,17 @@ export default function Home() {
                   <button type="button" className={`mode-option ${formData.mode === "youtube" ? "active" : ""}`}
                     onClick={() => setFormData({ ...formData, mode: "youtube" })}>
                     <PlayIcon /> YouTube Sync
+                    <span className="mode-desc">Paste a link, watch together</span>
                   </button>
                   <button type="button" className={`mode-option ${formData.mode === "screenshare" ? "active" : ""}`}
                     onClick={() => setFormData({ ...formData, mode: "screenshare" })}>
                     <GlobeIcon /> Screen Share
+                    <span className="mode-desc">Stream your screen live</span>
                   </button>
                   <button type="button" className={`mode-option ${formData.mode === "upload" ? "active" : ""}`}
                     onClick={() => setFormData({ ...formData, mode: "upload" })}>
                     <BoltIcon /> Upload Video
+                    <span className="mode-desc">Best for movies and long form content</span>
                   </button>
                 </div>
               </div>
