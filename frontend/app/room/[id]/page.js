@@ -78,9 +78,17 @@ export default function RoomPage() {
     const [voiceActive, setVoiceActive] = useState(false);
     const [voiceMuted, setVoiceMuted] = useState(true);
     const [voiceUsers, setVoiceUsers] = useState({}); // { username: { muted, active } }
+    const [screenStream, setScreenStream] = useState(null);
+    const [isScreenSharing, setIsScreenSharing] = useState(false);
+    const [remoteScreenStream, setRemoteScreenStream] = useState(null);
+    const [uploadProgress, setUploadProgress] = useState(null);
+    const [uploadedVideoUrl, setUploadedVideoUrl] = useState(null);
 
     const wsRef = useRef(null);
     const playerRef = useRef(null);
+    const uploadVideoRef = useRef(null);
+    const screenVideoRef = useRef(null);
+    const remoteScreenRef = useRef(null);
     const chatEndRef = useRef(null);
     const chatContainerRef = useRef(null);
     const ignoreNextEvent = useRef(false);
@@ -149,8 +157,7 @@ export default function RoomPage() {
 
     /* ── Load YouTube IFrame API ──────────────────── */
     useEffect(() => {
-        if (!joined || !room) return;
-
+        if (!joined || !room || room.mode !== "youtube") return;
         if (window.YT && window.YT.Player) {
             initPlayer();
             return;
@@ -168,6 +175,20 @@ export default function RoomPage() {
             window.onYouTubeIframeAPIReady = null;
         };
     }, [joined, room]);
+
+    // Attach screen stream to video element
+    useEffect(() => {
+        if (screenStream && screenVideoRef.current) {
+            screenVideoRef.current.srcObject = screenStream;
+        }
+    }, [screenStream]);
+
+    // Set initial upload video URL from room data
+    useEffect(() => {
+        if (room?.mode === "upload" && room?.upload_filename && !uploadedVideoUrl) {
+            setUploadedVideoUrl(`${getApiUrl()}/api/rooms/${roomId}/video`);
+        }
+    }, [room]);
 
     function initPlayer() {
         const videoId = extractVideoId(room?.video_url);
@@ -248,6 +269,10 @@ export default function RoomPage() {
                         playerRef.current.seekTo(msg.timestamp, true);
                         playerRef.current.playVideo();
                     }
+                    if (uploadVideoRef.current) {
+                        uploadVideoRef.current.currentTime = msg.timestamp;
+                        uploadVideoRef.current.play().catch(() => {});
+                    }
                     setMessages((prev) => [
                         ...prev,
                         { type: "system", content: `${msg.username} played the video` },
@@ -260,6 +285,10 @@ export default function RoomPage() {
                         playerRef.current.seekTo(msg.timestamp, true);
                         playerRef.current.pauseVideo();
                     }
+                    if (uploadVideoRef.current) {
+                        uploadVideoRef.current.currentTime = msg.timestamp;
+                        uploadVideoRef.current.pause();
+                    }
                     setMessages((prev) => [
                         ...prev,
                         { type: "system", content: `${msg.username} paused the video` },
@@ -270,6 +299,27 @@ export default function RoomPage() {
                     if (playerRef.current && playerReady.current) {
                         ignoreNextEvent.current = true;
                         playerRef.current.seekTo(msg.timestamp, true);
+                    }
+                    if (uploadVideoRef.current) {
+                        uploadVideoRef.current.currentTime = msg.timestamp;
+                    }
+                    break;
+
+                case "video:uploaded":
+                    setUploadedVideoUrl(msg.url);
+                    showToast("Video uploaded by host");
+                    break;
+
+                case "screen:start":
+                    if (msg.username !== username) {
+                        showToast(`${msg.username} started screen sharing`);
+                    }
+                    break;
+
+                case "screen:stop":
+                    if (msg.username !== username) {
+                        setRemoteScreenStream(null);
+                        showToast(`${msg.username} stopped sharing`);
                     }
                     break;
 
@@ -522,9 +572,93 @@ export default function RoomPage() {
         if (playerRef.current && playerReady.current) {
             playerRef.current.setVolume(v);
         }
+        if (uploadVideoRef.current) {
+            uploadVideoRef.current.volume = v / 100;
+        }
         if (canControlVideo) {
             sendWsMessage({ type: "volume:change", volume: v });
         }
+    }
+
+    /* Screen Share */
+    async function startScreenShare() {
+        try {
+            const stream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
+            setScreenStream(stream);
+            setIsScreenSharing(true);
+            if (screenVideoRef.current) {
+                screenVideoRef.current.srcObject = stream;
+            }
+            sendWsMessage({ type: "screen:start", username });
+            stream.getVideoTracks()[0].onended = () => stopScreenShare();
+        } catch (e) {
+            setToast("Screen share cancelled");
+        }
+    }
+
+    function stopScreenShare() {
+        if (screenStream) {
+            screenStream.getTracks().forEach(t => t.stop());
+        }
+        setScreenStream(null);
+        setIsScreenSharing(false);
+        sendWsMessage({ type: "screen:stop", username });
+    }
+
+    /* Upload Video */
+    async function handleFileUpload(e) {
+        const file = e.target.files[0];
+        if (!file) return;
+
+        setUploadProgress(0);
+        const formData = new FormData();
+        formData.append("file", file);
+
+        try {
+            const xhr = new XMLHttpRequest();
+            xhr.upload.onprogress = (ev) => {
+                if (ev.lengthComputable) {
+                    setUploadProgress(Math.round((ev.loaded / ev.total) * 100));
+                }
+            };
+            xhr.onload = () => {
+                if (xhr.status === 200) {
+                    const data = JSON.parse(xhr.responseText);
+                    setUploadedVideoUrl(`${getApiUrl()}${data.url}`);
+                    setUploadProgress(null);
+                    setToast("Video uploaded");
+                    sendWsMessage({ type: "video:uploaded", url: `${getApiUrl()}${data.url}` });
+                } else {
+                    setUploadProgress(null);
+                    setToast("Upload failed");
+                }
+            };
+            xhr.onerror = () => { setUploadProgress(null); setToast("Upload failed"); };
+            xhr.open("POST", `${getApiUrl()}/api/rooms/${roomId}/upload`);
+            xhr.send(formData);
+        } catch {
+            setUploadProgress(null);
+            setToast("Upload failed");
+        }
+    }
+
+    /* Upload video sync controls */
+    function handleUploadVideoPlay() {
+        if (!canControlVideo) return;
+        const time = uploadVideoRef.current?.currentTime || 0;
+        sendWsMessage({ type: "video:play", timestamp: time });
+    }
+
+    function handleUploadVideoPause() {
+        if (!canControlVideo) return;
+        const time = uploadVideoRef.current?.currentTime || 0;
+        sendWsMessage({ type: "video:pause", timestamp: time });
+    }
+
+    function handleUploadVideoSeek() {
+        if (!canControlVideo) return;
+        const time = uploadVideoRef.current?.currentTime || 0;
+        sendWsMessage({ type: "video:seek", timestamp: time });
     }
 
     function handleKick(target) {
@@ -763,7 +897,74 @@ export default function RoomPage() {
                 {/* Video + Controls */}
                 <div className="room-video-section">
                     <div className="video-wrapper">
-                        <div id="yt-player" />
+                        {/* YouTube mode */}
+                        {room?.mode === "youtube" && <div id="yt-player" />}
+
+                        {/* Screen Share mode */}
+                        {room?.mode === "screenshare" && (
+                            <div className="screenshare-wrapper">
+                                {isScreenSharing ? (
+                                    <video ref={screenVideoRef} autoPlay muted className="screenshare-video" />
+                                ) : remoteScreenStream ? (
+                                    <video ref={remoteScreenRef} autoPlay className="screenshare-video" />
+                                ) : (
+                                    <div className="screenshare-placeholder">
+                                        {canControlVideo ? (
+                                            <button className="btn-primary" onClick={startScreenShare}>
+                                                Share Your Screen
+                                            </button>
+                                        ) : (
+                                            <p>Waiting for host to start screen sharing...</p>
+                                        )}
+                                    </div>
+                                )}
+                                {isScreenSharing && (
+                                    <button className="screenshare-stop-btn" onClick={stopScreenShare}>
+                                        Stop Sharing
+                                    </button>
+                                )}
+                            </div>
+                        )}
+
+                        {/* Upload mode */}
+                        {room?.mode === "upload" && (
+                            <div className="upload-wrapper">
+                                {uploadedVideoUrl || room?.upload_filename ? (
+                                    <video
+                                        ref={uploadVideoRef}
+                                        src={uploadedVideoUrl || `${getApiUrl()}/api/rooms/${roomId}/video`}
+                                        className="upload-video"
+                                        controls={canControlVideo}
+                                        onPlay={handleUploadVideoPlay}
+                                        onPause={handleUploadVideoPause}
+                                        onSeeked={handleUploadVideoSeek}
+                                    />
+                                ) : (
+                                    <div className="upload-placeholder">
+                                        {canControlVideo ? (
+                                            <>
+                                                <p>Upload a video to start streaming</p>
+                                                <label className="btn-primary upload-btn">
+                                                    Choose File
+                                                    <input type="file" accept="video/*" onChange={handleFileUpload} hidden />
+                                                </label>
+                                                {uploadProgress !== null && (
+                                                    <div className="upload-progress">
+                                                        <div className="upload-progress-bar" style={{ width: `${uploadProgress}%` }} />
+                                                        <span>{uploadProgress}%</span>
+                                                    </div>
+                                                )}
+                                            </>
+                                        ) : (
+                                            <p>Waiting for host to upload a video...</p>
+                                        )}
+                                    </div>
+                                )}
+                            </div>
+                        )}
+
+                        {/* Fallback for rooms without mode */}
+                        {!room?.mode && <div id="yt-player" />}
                     </div>
 
                     {/* Video Controls */}
