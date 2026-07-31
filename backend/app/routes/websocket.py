@@ -445,18 +445,24 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str, username: str =
             # ── Screen Share Signaling ──────────────
 
             elif msg_type == "screen:start":
-                await redis_client.set_room_state(room_id, 0, False, video_url=f"screen:{username}")
                 await manager.broadcast(room_id, {
                     "type": "screen:start",
                     "username": username,
                 })
+                try:
+                    await redis_client.set_room_state(room_id, 0, False, video_url=f"screen:{username}")
+                except Exception:
+                    pass
 
             elif msg_type == "screen:stop":
-                await redis_client.set_room_state(room_id, 0, False, video_url="")
                 await manager.broadcast(room_id, {
                     "type": "screen:stop",
                     "username": username,
                 })
+                try:
+                    await redis_client.set_room_state(room_id, 0, False, video_url="")
+                except Exception:
+                    pass
 
             elif msg_type == "screen:offer":
                 target = message.get("target", "")
