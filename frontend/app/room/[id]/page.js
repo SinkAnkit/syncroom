@@ -586,24 +586,28 @@ export default function RoomPage() {
         }
     }
 
-    // PeerJS config with STUN + TURN for NAT traversal
-    const peerConfig = {
-        config: {
-            iceServers: [
-                { urls: "stun:stun.l.google.com:19302" },
-                {
-                    urls: "turn:openrelay.metered.ca:443",
-                    username: "openrelayproject",
-                    credential: "openrelayproject",
-                },
-                {
-                    urls: "turn:openrelay.metered.ca:443?transport=tcp",
-                    username: "openrelayproject",
-                    credential: "openrelayproject",
-                },
-            ]
+    // Fetch working ICE servers (STUN + TURN) from metered.ca free tier.
+    // Falls back to Google STUN only if the fetch fails.
+    async function getIceServers() {
+        const METERED_API = process.env.NEXT_PUBLIC_METERED_API_URL;
+        if (METERED_API) {
+            try {
+                const res = await fetch(METERED_API);
+                if (res.ok) {
+                    const servers = await res.json();
+                    if (Array.isArray(servers) && servers.length) return servers;
+                }
+            } catch {}
         }
-    };
+        return [
+            { urls: "stun:stun.l.google.com:19302" },
+            {
+                urls: "turn:openrelay.metered.ca:443",
+                username: "openrelayproject",
+                credential: "openrelayproject",
+            },
+        ];
+    }
 
     /* Screen Share - PeerJS + HTTP polling (bypasses broken WS broadcast) */
     async function startScreenShare() {
@@ -615,8 +619,9 @@ export default function RoomPage() {
             screenStreamRef.current = stream;
             isScreenSharingRef.current = true;
 
+            const iceServers = await getIceServers();
             const { Peer } = await import('peerjs');
-            const peer = new Peer(peerConfig);
+            const peer = new Peer({ config: { iceServers } });
             screenPeers.current._peer = peer;
 
             peer.on('open', async (id) => {
@@ -689,8 +694,9 @@ export default function RoomPage() {
 
     async function connectToScreenShare(peerId) {
         try {
+            const iceServers = await getIceServers();
             const { Peer } = await import('peerjs');
-            const peer = new Peer(peerConfig);
+            const peer = new Peer({ config: { iceServers } });
             screenPeers.current._peer = peer;
 
             peer.on('open', () => {
