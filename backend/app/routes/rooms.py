@@ -1,6 +1,6 @@
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, status, Query, UploadFile, File
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, desc
 from app.database import get_db
@@ -152,3 +152,33 @@ async def serve_video(room_id: str, db: AsyncSession = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Video file missing")
 
     return FileResponse(filepath, media_type="video/mp4")
+
+
+# In-memory screen share state (simple, no Redis needed)
+_screen_shares: dict = {}
+
+
+@router.post("/{room_id}/screen")
+async def set_screen_share(room_id: str, body: dict):
+    """Store the screen sharer's PeerJS peer ID."""
+    _screen_shares[room_id] = {
+        "peer_id": body.get("peer_id"),
+        "sharer": body.get("sharer", "Host")
+    }
+    return {"ok": True}
+
+
+@router.get("/{room_id}/screen")
+async def get_screen_share(room_id: str):
+    """Get active screen share peer ID for a room."""
+    data = _screen_shares.get(room_id)
+    if data:
+        return data
+    return JSONResponse(content={"peer_id": None}, status_code=200)
+
+
+@router.delete("/{room_id}/screen")
+async def clear_screen_share(room_id: str):
+    """Clear screen share state when admin stops sharing."""
+    _screen_shares.pop(room_id, None)
+    return {"ok": True}

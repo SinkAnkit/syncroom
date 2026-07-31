@@ -322,25 +322,7 @@ export default function RoomPage() {
                     break;
 
                 case "screen:start":
-                    setScreenSharer(msg.username);
-                    if (msg.username !== username && msg.peerId) {
-                        showToast(`${msg.username} started screen sharing`);
-                        connectToScreenShare(msg.peerId);
-                    }
-                    break;
-
                 case "screen:stop":
-                    setScreenSharer(null);
-                    setRemoteScreenStream(null);
-                    if (screenPeers.current._peer && !isScreenSharingRef.current) {
-                        screenPeers.current._peer.destroy();
-                        screenPeers.current = {};
-                    }
-                    if (msg.username !== username) {
-                        showToast(`${msg.username} stopped sharing`);
-                    }
-                    break;
-
                 case "screen:offer":
                 case "screen:answer":
                 case "screen:ice":
@@ -604,7 +586,7 @@ export default function RoomPage() {
         }
     }
 
-    /* Screen Share - uses PeerJS for reliable WebRTC */
+    /* Screen Share - PeerJS + HTTP polling (bypasses broken WS broadcast) */
     async function startScreenShare() {
         try {
             const stream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
@@ -614,21 +596,22 @@ export default function RoomPage() {
             screenStreamRef.current = stream;
             isScreenSharingRef.current = true;
 
-            // Create PeerJS peer and wait for it to be ready
             const { Peer } = await import('peerjs');
-            const peerId = `syncroom-${roomId}-${Date.now()}`;
-            const peer = new Peer(peerId);
+            const peer = new Peer();
             screenPeers.current._peer = peer;
-            screenPeers.current._calls = [];
 
-            peer.on('open', (id) => {
-                // Broadcast our peer ID to all room members via WebSocket
-                sendWsMessage({ type: "screen:start", username, peerId: id });
+            peer.on('open', async (id) => {
+                // Store peer ID in room data via HTTP (reliable, no WS needed)
+                await fetch(`${getApiUrl()}/api/rooms/${roomId}/screen`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ peer_id: id })
+                });
             });
 
+            // When a viewer calls us, answer with our stream
             peer.on('call', (call) => {
-                // Answer incoming calls with our stream (for late joiners who call us)
-                call.answer(stream);
+                call.answer(screenStreamRef.current);
             });
 
             stream.getVideoTracks()[0].onended = () => stopScreenShare();
@@ -637,7 +620,7 @@ export default function RoomPage() {
         }
     }
 
-    function stopScreenShare() {
+    async function stopScreenShare() {
         if (screenStreamRef.current) {
             screenStreamRef.current.getTracks().forEach(t => t.stop());
         }
@@ -651,36 +634,60 @@ export default function RoomPage() {
         setRemoteScreenStream(null);
         screenStreamRef.current = null;
         isScreenSharingRef.current = false;
-        sendWsMessage({ type: "screen:stop", username });
+        // Clear peer ID from server
+        await fetch(`${getApiUrl()}/api/rooms/${roomId}/screen`, {
+            method: 'DELETE'
+        }).catch(() => {});
     }
+
+    // Poll for screen share peer ID (members only)
+    useEffect(() => {
+        if (!joined || !room || room.mode !== "screenshare" || isScreenSharingRef.current) return;
+
+        let active = true;
+        let connected = false;
+
+        async function pollForScreen() {
+            while (active && !connected) {
+                try {
+                    const res = await fetch(`${getApiUrl()}/api/rooms/${roomId}/screen`);
+                    if (res.ok) {
+                        const data = await res.json();
+                        if (data.peer_id && !connected) {
+                            connected = true;
+                            setScreenSharer(data.sharer || "Host");
+                            connectToScreenShare(data.peer_id);
+                            return;
+                        }
+                    }
+                } catch {}
+                await new Promise(r => setTimeout(r, 2000));
+            }
+        }
+        pollForScreen();
+        return () => { active = false; };
+    }, [joined, room]);
 
     async function connectToScreenShare(peerId) {
         try {
             const { Peer } = await import('peerjs');
-            const myPeerId = `syncroom-viewer-${roomId}-${Date.now()}`;
-            const peer = new Peer(myPeerId);
+            const peer = new Peer();
             screenPeers.current._peer = peer;
 
             peer.on('open', () => {
-                // Call the sharer to get their stream
-                const call = peer.call(peerId, new MediaStream()); // empty stream, we just want to receive
+                const call = peer.call(peerId, new MediaStream());
                 call.on('stream', (remoteStream) => {
                     setRemoteScreenStream(remoteStream);
                 });
-                call.on('error', () => {
-                    setToast("Failed to connect to screen share");
-                });
+                call.on('error', () => setToast("Stream connection failed"));
             });
-
-            peer.on('error', () => {
-                setToast("Connection failed");
-            });
+            peer.on('error', (err) => setToast("Connection error: " + err.type));
         } catch (e) {
             setToast("Failed to connect");
         }
     }
 
-    function createScreenPeer() { /* unused, kept for compat */ }
+    function createScreenPeer() { }
 
     /* Upload Video */
     async function handleFileUpload(e) {
