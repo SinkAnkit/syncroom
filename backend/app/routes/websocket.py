@@ -173,9 +173,9 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str, username: str =
         })
 
         # Send active screen share state if any
-        active_sharer = await redis_client.client.get(f"screen:{room_id}")
-        if active_sharer:
-            sharer_name = active_sharer if isinstance(active_sharer, str) else active_sharer.decode()
+        state = await redis_client.get_room_state(room_id)
+        if state.get("video_url", "").startswith("screen:"):
+            sharer_name = state["video_url"].replace("screen:", "")
             await manager.send_to(room_id, username, {
                 "type": "screen:start",
                 "username": sharer_name,
@@ -445,14 +445,14 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str, username: str =
             # ── Screen Share Signaling ──────────────
 
             elif msg_type == "screen:start":
-                await redis_client.client.set(f"screen:{room_id}", username)
+                await redis_client.set_room_state(room_id, 0, False, video_url=f"screen:{username}")
                 await manager.broadcast(room_id, {
                     "type": "screen:start",
                     "username": username,
                 })
 
             elif msg_type == "screen:stop":
-                await redis_client.client.delete(f"screen:{room_id}")
+                await redis_client.set_room_state(room_id, 0, False, video_url="")
                 await manager.broadcast(room_id, {
                     "type": "screen:stop",
                     "username": username,
