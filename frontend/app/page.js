@@ -13,32 +13,9 @@ function getApiUrl() {
 
 const SyncRoomLogo = () => (
   <div className="logo-icon">
-    <svg width="36" height="36" viewBox="0 0 48 48" fill="none">
-      <defs>
-        <linearGradient id="ring1" x1="0" y1="0" x2="48" y2="48">
-          <stop offset="0%" stopColor="#7c8aff" />
-          <stop offset="100%" stopColor="#5865f2" />
-        </linearGradient>
-        <linearGradient id="ring2" x1="48" y1="0" x2="0" y2="48">
-          <stop offset="0%" stopColor="#00d4aa" />
-          <stop offset="100%" stopColor="#5865f2" />
-        </linearGradient>
-        <linearGradient id="playFill" x1="18" y1="14" x2="34" y2="34">
-          <stop offset="0%" stopColor="#fff" />
-          <stop offset="100%" stopColor="#c8d0ff" />
-        </linearGradient>
-      </defs>
-      {/* Outer ring */}
-      <circle cx="24" cy="24" r="22" stroke="url(#ring1)" strokeWidth="2.5" fill="none" opacity="0.5" />
-      {/* Inner ring with rotation */}
-      <circle cx="24" cy="24" r="16" stroke="url(#ring2)" strokeWidth="2" fill="none" opacity="0.7" strokeDasharray="12 6" className="logo-ring-spin" />
-      {/* Filled center */}
-      <circle cx="24" cy="24" r="11" fill="#5865f2" opacity="0.15" />
-      {/* Play triangle */}
-      <path d="M20 16 L34 24 L20 32Z" fill="url(#playFill)" />
-      {/* Orbiting sync dot */}
-      <circle cx="44" cy="14" r="3.5" fill="#00d4aa" className="logo-orbit-dot" />
-      <circle cx="44" cy="14" r="1.8" fill="#fff" className="logo-orbit-dot" />
+    <svg width="28" height="28" viewBox="0 0 28 28" fill="none">
+      <rect width="28" height="28" rx="6" fill="#5865f2" />
+      <path d="M9 11 L18 14 L9 17Z" fill="#fff" />
     </svg>
   </div>
 );
@@ -183,12 +160,12 @@ export default function Home() {
   }
 
   const featureCards = [
-    { icon: <BoltIcon />, title: "Instant Sync", desc: "Play, pause, seek — everyone stays perfectly in sync via real-time WebSocket connections.", color: "neon-purple" },
+    { icon: <BoltIcon />, title: "Instant Sync", desc: "Play, pause, seek: everyone stays perfectly in sync via real-time WebSocket connections.", color: "neon-purple" },
     { icon: <ChatIcon />, title: "Live Chat", desc: "React in real-time with typing indicators, emoji reactions, and persistent message history.", color: "neon-cyan" },
-    { icon: <LinkIcon />, title: "One-Click Share", desc: "Share your room link — no sign-up required. Just enter a name and start watching.", color: "neon-pink" },
+    { icon: <LinkIcon />, title: "One-Click Share", desc: "Share your room link. No sign-up required, just enter a name and start watching.", color: "neon-pink" },
     { icon: <UsersIcon />, title: "Role System", desc: "Admin, Mod, and Member roles with granular video control and moderation permissions.", color: "neon-purple" },
-    { icon: <PlayIcon />, title: "Any YouTube Video", desc: "Paste any YouTube link — music, tutorials, podcasts, livestreams. If it's on YouTube, sync it.", color: "neon-cyan" },
-    { icon: <ShieldIcon />, title: "Admin Controls", desc: "Control playback, volume, kick users, promote mods — full room management.", color: "neon-pink" },
+    { icon: <PlayIcon />, title: "Any YouTube Video", desc: "Paste any YouTube link: music, tutorials, podcasts, livestreams. If it's on YouTube, sync it.", color: "neon-cyan" },
+    { icon: <ShieldIcon />, title: "Admin Controls", desc: "Control playback, kick users, promote mods, and manage the whole room.", color: "neon-pink" },
   ];
 
   return (
@@ -234,7 +211,7 @@ export default function Home() {
         </h1>
 
         <p>
-          Create a room, paste a YouTube link, invite your friends — and watch
+          Create a room, paste a YouTube link, invite your friends, and watch
           in perfect sync with live chat. No more counting down.
         </p>
 
@@ -247,47 +224,6 @@ export default function Home() {
           </button>
         </div>
 
-        {/* Preview Window */}
-        <div className="hero-preview">
-          <div className="hero-preview-bar">
-            <span className="hero-preview-dot" />
-            <span className="hero-preview-dot" />
-            <span className="hero-preview-dot" />
-            <span className="hero-preview-title">SyncRoom — Movie Night</span>
-          </div>
-          <div className="hero-preview-content">
-            <div className="hero-preview-video">
-              <div className="hero-preview-play">&#9654;</div>
-              <div className="hero-preview-controls">
-                <div className="hero-preview-progress">
-                  <div className="hero-preview-progress-bar" />
-                </div>
-              </div>
-            </div>
-            <div className="hero-preview-chat">
-              <div className="hero-preview-msg">
-                <div className="hero-preview-msg-user" style={{ color: '#7c8aff' }}>Alex</div>
-                <div className="hero-preview-msg-text">This part is incredible!</div>
-              </div>
-              <div className="hero-preview-msg">
-                <div className="hero-preview-msg-user" style={{ color: '#00d4aa' }}>Sam</div>
-                <div className="hero-preview-msg-text">Wait for the drop at 2:34</div>
-              </div>
-              <div className="hero-preview-msg">
-                <div className="hero-preview-msg-user" style={{ color: '#eb459e' }}>Jordan</div>
-                <div className="hero-preview-msg-text">This is way better than counting down!</div>
-              </div>
-              <div className="hero-preview-msg">
-                <div className="hero-preview-msg-user" style={{ color: '#faa81a' }}>Maya</div>
-                <div className="hero-preview-msg-text">Can we rewind a bit?</div>
-              </div>
-              <div className="hero-preview-typing">
-                <span /><span /><span />
-                Alex is typing...
-              </div>
-            </div>
-          </div>
-        </div>
       </section>
 
       {/* Features */}
@@ -374,7 +310,7 @@ export default function Home() {
           </div>
         </div>
         <div className="footer-bottom">
-          <p className="footer-trademark">© {new Date().getFullYear()} SyncRoom — by Sinkant™</p>
+          <p className="footer-trademark">© {new Date().getFullYear()} SyncRoom by Sinkant</p>
         </div>
       </footer>
 
