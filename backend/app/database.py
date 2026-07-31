@@ -17,7 +17,18 @@ if DATABASE_URL.startswith("postgres://"):
 elif DATABASE_URL.startswith("postgresql://") and "+asyncpg" not in DATABASE_URL:
     DATABASE_URL = DATABASE_URL.replace("postgresql://", "postgresql+asyncpg://", 1)
 
-engine = create_async_engine(DATABASE_URL, echo=False)
+# asyncpg doesn't accept libpq-style query params like sslmode/channel_binding.
+# Strip them and pass SSL via connect_args instead.
+connect_args = {}
+if "postgresql+asyncpg" in DATABASE_URL:
+    from urllib.parse import urlsplit, urlunsplit
+    parts = urlsplit(DATABASE_URL)
+    if "sslmode" in parts.query or "channel_binding" in parts.query:
+        # Remove the query string; asyncpg handles SSL via connect_args
+        DATABASE_URL = urlunsplit((parts.scheme, parts.netloc, parts.path, "", ""))
+        connect_args["ssl"] = True
+
+engine = create_async_engine(DATABASE_URL, echo=False, connect_args=connect_args)
 async_session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
 
