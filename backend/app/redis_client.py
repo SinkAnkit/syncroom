@@ -17,6 +17,7 @@ _redis = None
 _room_states: dict[str, str] = {}
 _room_participants: dict[str, set[str]] = {}
 _room_roles: dict[str, dict[str, str]] = {}  # room_id -> {username: role}
+_room_screen: dict[str, str] = {}  # room_id -> username currently sharing
 
 
 async def _get_redis():
@@ -35,7 +36,12 @@ async def close_redis():
     """Close Redis connection if active."""
     global _redis
     if _redis is not None:
-        await _redis.close()
+        try:
+            # redis-py >= 5 deprecates close() in favour of aclose()
+            closer = getattr(_redis, "aclose", None) or _redis.close
+            await closer()
+        except Exception as exc:  # pragma: no cover - shutdown best effort
+            logger.warning(f"Error closing Redis connection: {exc}")
         _redis = None
         logger.info("Redis connection closed")
 
@@ -49,6 +55,9 @@ def _participants_key(room_id: str) -> str:
 
 def _roles_key(room_id: str) -> str:
     return f"room:{room_id}:roles"
+
+def _screen_key(room_id: str) -> str:
+    return f"room:{room_id}:screen"
 
 
 # --- Room State (includes volume) ---
@@ -68,11 +77,23 @@ async def get_room_state(room_id: str) -> dict:
     return {"timestamp": 0, "is_playing": False, "video_url": "", "volume": 80}
 
 
-async def set_room_state(room_id: str, timestamp: float, is_playing: bool, video_url: str = "", volume: int = -1):
-    # Get existing state to preserve volume if not explicitly set
-    if volume == -1:
+async def set_room_state(
+    room_id: str,
+    timestamp: float,
+    is_playing: bool,
+    video_url: Optional[str] = None,
+    volume: int = -1,
+):
+    """
+    Persist playback state. ``video_url``/``volume`` left as None/-1 keep the
+    previously stored value instead of silently wiping it.
+    """
+    if volume == -1 or video_url is None:
         existing = await get_room_state(room_id)
-        volume = existing.get("volume", 80)
+        if volume == -1:
+            volume = existing.get("volume", 80)
+        if video_url is None:
+            video_url = existing.get("video_url", "")
 
     state = json.dumps({
         "timestamp": timestamp,
@@ -186,12 +207,58 @@ async def remove_user_role(room_id: str, username: str):
         _room_roles[room_id].pop(username, None)
 
 
+# --- Screen Share ---
+
+async def set_screen_sharer(room_id: str, username: str):
+    """Record who is currently sharing their screen in a room."""
+    if _use_redis:
+        r = await _get_redis()
+        await r.set(_screen_key(room_id), username, ex=86400)
+        return
+    _room_screen[room_id] = username
+
+
+async def get_screen_sharer(room_id: str) -> Optional[str]:
+    """Return the username currently sharing, or None."""
+    if _use_redis:
+        r = await _get_redis()
+        return await r.get(_screen_key(room_id))
+    return _room_screen.get(room_id)
+
+
+async def clear_screen_sharer(room_id: str, username: Optional[str] = None) -> bool:
+    """
+    Clear the active screen share.
+
+    If ``username`` is given, only clears when that user is the current sharer.
+    Returns True when state was actually cleared.
+    """
+    current = await get_screen_sharer(room_id)
+    if current is None:
+        return False
+    if username is not None and current != username:
+        return False
+
+    if _use_redis:
+        r = await _get_redis()
+        await r.delete(_screen_key(room_id))
+    else:
+        _room_screen.pop(room_id, None)
+    return True
+
+
 async def clear_room_state(room_id: str):
     if _use_redis:
         r = await _get_redis()
-        await r.delete(_room_key(room_id), _participants_key(room_id), _roles_key(room_id))
+        await r.delete(
+            _room_key(room_id),
+            _participants_key(room_id),
+            _roles_key(room_id),
+            _screen_key(room_id),
+        )
         return
 
     _room_states.pop(_room_key(room_id), None)
     _room_participants.pop(_participants_key(room_id), None)
     _room_roles.pop(room_id, None)
+    _room_screen.pop(room_id, None)

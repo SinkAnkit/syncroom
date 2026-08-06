@@ -1,6 +1,6 @@
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, status, Query, UploadFile, File
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, desc
 from app.database import get_db
@@ -12,8 +12,21 @@ import uuid
 
 router = APIRouter(prefix="/api/rooms", tags=["rooms"])
 
-UPLOAD_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "uploads")
+UPLOAD_DIR = os.path.abspath(
+    os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "uploads")
+)
 os.makedirs(UPLOAD_DIR, exist_ok=True)
+
+MAX_UPLOAD_BYTES = int(os.getenv("MAX_UPLOAD_MB", "2048")) * 1024 * 1024
+ALLOWED_VIDEO_EXT = {".mp4", ".webm", ".mkv", ".mov", ".m4v", ".ogv"}
+VIDEO_MIME = {
+    ".mp4": "video/mp4",
+    ".m4v": "video/mp4",
+    ".webm": "video/webm",
+    ".mkv": "video/x-matroska",
+    ".mov": "video/quicktime",
+    ".ogv": "video/ogg",
+}
 
 
 @router.post("", response_model=RoomResponse)
@@ -71,7 +84,7 @@ async def get_room(room_id: str, db: AsyncSession = Depends(get_db)):
     """Get room details."""
     result = await db.execute(select(Room).where(Room.id == room_id))
     room = result.scalar_one_or_none()
-    if not room:
+    if not room or not room.is_active:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Room not found")
     return RoomResponse(**room.to_dict())
 
@@ -87,7 +100,9 @@ async def delete_room(
     room = result.scalar_one_or_none()
     if not room:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Room not found")
-    if user and room.creator_id and room.creator_id != user.id:
+    # Previously an *anonymous* caller passed this check, so anyone could delete
+    # any owned room simply by omitting the Authorization header.
+    if room.creator_id and (user is None or room.creator_id != user.id):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not the room owner")
     room.is_active = False
     await db.commit()
@@ -100,15 +115,19 @@ async def get_room_messages(
     limit: int = Query(100, ge=1, le=500),
     db: AsyncSession = Depends(get_db),
 ):
-    """Get chat messages for a room."""
+    """Get the most recent chat messages for a room, oldest-first."""
     from app.models import ChatMessage
+    # Take the newest N, then flip back to chronological order. Ordering
+    # ascending before LIMIT returned the *oldest* N, so busy rooms opened
+    # showing ancient history and none of the recent conversation.
     result = await db.execute(
         select(ChatMessage)
         .where(ChatMessage.room_id == room_id)
-        .order_by(ChatMessage.created_at)
+        .order_by(desc(ChatMessage.id))
         .limit(limit)
     )
-    messages = result.scalars().all()
+    messages = list(result.scalars().all())
+    messages.reverse()
     return [m.to_dict() for m in messages]
 
 
@@ -126,59 +145,66 @@ async def upload_video(
     if room.mode != "upload":
         raise HTTPException(status_code=400, detail="Room is not in upload mode")
 
-    ext = os.path.splitext(file.filename or "video.mp4")[1] or ".mp4"
+    ext = os.path.splitext(file.filename or "video.mp4")[1].lower()
+    if ext not in ALLOWED_VIDEO_EXT:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unsupported file type. Allowed: {', '.join(sorted(ALLOWED_VIDEO_EXT))}",
+        )
+
+    previous = room.upload_filename
     safe_name = f"{room_id}_{uuid.uuid4().hex[:8]}{ext}"
     filepath = os.path.join(UPLOAD_DIR, safe_name)
 
-    with open(filepath, "wb") as f:
-        while chunk := await file.read(1024 * 1024):
-            f.write(chunk)
+    written = 0
+    try:
+        with open(filepath, "wb") as f:
+            while chunk := await file.read(1024 * 1024):
+                written += len(chunk)
+                if written > MAX_UPLOAD_BYTES:
+                    raise HTTPException(
+                        status_code=413,
+                        detail=f"File too large (max {MAX_UPLOAD_BYTES // (1024 * 1024)} MB)",
+                    )
+                f.write(chunk)
+    except HTTPException:
+        # Don't leave a partial file behind on the disk.
+        if os.path.exists(filepath):
+            os.remove(filepath)
+        raise
+    except Exception:
+        if os.path.exists(filepath):
+            os.remove(filepath)
+        raise HTTPException(status_code=500, detail="Upload failed")
 
     room.upload_filename = safe_name
     await db.commit()
+
+    # Reclaim the disk space used by the room's previous upload.
+    if previous and previous != safe_name:
+        old_path = os.path.join(UPLOAD_DIR, previous)
+        if os.path.commonpath([os.path.abspath(old_path), UPLOAD_DIR]) == UPLOAD_DIR:
+            try:
+                os.remove(old_path)
+            except OSError:
+                pass
+
     return {"filename": safe_name, "url": f"/api/rooms/{room_id}/video"}
 
 
 @router.get("/{room_id}/video")
 async def serve_video(room_id: str, db: AsyncSession = Depends(get_db)):
-    """Serve uploaded video with range support for streaming."""
+    """Serve uploaded video. Starlette's FileResponse handles Range requests,
+    which is what lets the browser seek instead of buffering the whole file."""
     result = await db.execute(select(Room).where(Room.id == room_id))
     room = result.scalar_one_or_none()
     if not room or not room.upload_filename:
         raise HTTPException(status_code=404, detail="No video found")
 
-    filepath = os.path.join(UPLOAD_DIR, room.upload_filename)
-    if not os.path.exists(filepath):
+    # Defence in depth: never let a stored name escape the upload directory.
+    filepath = os.path.abspath(os.path.join(UPLOAD_DIR, os.path.basename(room.upload_filename)))
+    if os.path.commonpath([filepath, UPLOAD_DIR]) != UPLOAD_DIR or not os.path.exists(filepath):
         raise HTTPException(status_code=404, detail="Video file missing")
 
-    return FileResponse(filepath, media_type="video/mp4")
-
-
-# In-memory screen share state (simple, no Redis needed)
-_screen_shares: dict = {}
-
-
-@router.post("/{room_id}/screen")
-async def set_screen_share(room_id: str, body: dict):
-    """Store the screen sharer's PeerJS peer ID."""
-    _screen_shares[room_id] = {
-        "peer_id": body.get("peer_id"),
-        "sharer": body.get("sharer", "Host")
-    }
-    return {"ok": True}
-
-
-@router.get("/{room_id}/screen")
-async def get_screen_share(room_id: str):
-    """Get active screen share peer ID for a room."""
-    data = _screen_shares.get(room_id)
-    if data:
-        return data
-    return JSONResponse(content={"peer_id": None}, status_code=200)
-
-
-@router.delete("/{room_id}/screen")
-async def clear_screen_share(room_id: str):
-    """Clear screen share state when admin stops sharing."""
-    _screen_shares.pop(room_id, None)
-    return {"ok": True}
+    ext = os.path.splitext(filepath)[1].lower()
+    return FileResponse(filepath, media_type=VIDEO_MIME.get(ext, "video/mp4"))

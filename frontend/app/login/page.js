@@ -2,12 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-
-function getApiUrl() {
-    if (typeof window === "undefined") return "http://localhost:8000";
-    if (window.location.hostname === "localhost") return "http://localhost:8000";
-    return "https://syncroom-api.onrender.com";
-}
+import { getApiUrl } from "../lib/config";
 
 export default function LoginPage() {
     const router = useRouter();

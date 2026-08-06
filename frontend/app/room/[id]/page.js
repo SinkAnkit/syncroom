@@ -2,18 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
-
-function getApiUrl() {
-    if (typeof window === "undefined") return "http://localhost:8000";
-    if (window.location.hostname === "localhost") return "http://localhost:8000";
-    return "https://syncroom-api.onrender.com";
-}
-
-function getWsUrl() {
-    if (typeof window === "undefined") return "ws://localhost:8000";
-    if (window.location.hostname === "localhost") return "ws://localhost:8000";
-    return "wss://syncroom-api.onrender.com";
-}
+import { getApiUrl, getWsUrl } from "../../lib/config";
 
 /* ── Utilities ─────────────────────────────────────── */
 
@@ -84,6 +73,10 @@ export default function RoomPage() {
     const [uploadProgress, setUploadProgress] = useState(null);
     const [uploadedVideoUrl, setUploadedVideoUrl] = useState(null);
     const [screenSharer, setScreenSharer] = useState(null);
+    // Browsers refuse to autoplay media that carries audio without a gesture;
+    // when that happens we surface a tap-to-play overlay instead of a black box.
+    const [screenBlocked, setScreenBlocked] = useState(false);
+    const [playbackBlocked, setPlaybackBlocked] = useState(false);
 
     const wsRef = useRef(null);
     const playerRef = useRef(null);
@@ -95,7 +88,6 @@ export default function RoomPage() {
     const isScreenSharingRef = useRef(false);
     const chatEndRef = useRef(null);
     const chatContainerRef = useRef(null);
-    const ignoreNextEvent = useRef(false);
     const playerReady = useRef(false);
     const reconnectAttempt = useRef(0);
     const reconnectTimer = useRef(null);
@@ -105,6 +97,13 @@ export default function RoomPage() {
     const peerConnections = useRef({});
     const localStream = useRef(null);
     const remoteAudios = useRef({});
+    const pendingVoiceIce = useRef({});
+    const voiceActiveRef = useRef(false);
+    const wsIntentionalClose = useRef(false);
+    const toastTimer = useRef(null);
+    const suppressPlayerEventsUntil = useRef(0);
+    const suppressUploadEventsUntil = useRef(0);
+    const roleRef = useRef("member");
 
     const canControlVideo = myRole === "admin" || myRole === "mod";
     const canModerate = myRole === "admin";
@@ -180,18 +179,26 @@ export default function RoomPage() {
         };
     }, [joined, room]);
 
-    // Attach screen stream to video element
+    // Attach the local preview stream.
+    // The <video> is conditionally rendered, so it frequently mounted *after*
+    // this effect had already run with a null ref and the stream was never
+    // attached. Depending on both the stream and the sharing flag (which gates
+    // the element) makes the effect re-run once the node actually exists.
     useEffect(() => {
-        if (screenStream && screenVideoRef.current) {
-            screenVideoRef.current.srcObject = screenStream;
-        }
-    }, [screenStream]);
+        const el = screenVideoRef.current;
+        if (!el || !screenStream) return;
+        if (el.srcObject !== screenStream) el.srcObject = screenStream;
+        el.play().catch(() => { });
+    }, [screenStream, isScreenSharing]);
 
-    // Attach remote screen stream to video element
+    // Attach the received stream and handle autoplay rejection.
     useEffect(() => {
-        if (remoteScreenStream && remoteScreenRef.current) {
-            remoteScreenRef.current.srcObject = remoteScreenStream;
-        }
+        const el = remoteScreenRef.current;
+        if (!el || !remoteScreenStream) return;
+        if (el.srcObject !== remoteScreenStream) el.srcObject = remoteScreenStream;
+        el.play()
+            .then(() => setScreenBlocked(false))
+            .catch(() => setScreenBlocked(true));
     }, [remoteScreenStream]);
 
     // Set initial upload video URL from room data
@@ -201,31 +208,61 @@ export default function RoomPage() {
         }
     }, [room]);
 
+    // Keep a ref of the role so YouTube callbacks (created once, at player
+    // construction) never read a stale value.
+    useEffect(() => {
+        roleRef.current = myRole;
+    }, [myRole]);
+
     function initPlayer() {
         const videoId = extractVideoId(room?.video_url);
         if (!videoId || playerRef.current) return;
 
+        const controllable = roleRef.current === "admin" || roleRef.current === "mod";
         playerRef.current = new window.YT.Player("yt-player", {
             videoId,
-            playerVars: { autoplay: 1, controls: canControlVideo ? 1 : 0, modestbranding: 1, rel: 0, disablekb: canControlVideo ? 0 : 1 },
+            playerVars: {
+                autoplay: 1,
+                controls: controllable ? 1 : 0,
+                modestbranding: 1,
+                rel: 0,
+                disablekb: controllable ? 0 : 1,
+            },
             events: {
                 onReady: (e) => {
                     playerReady.current = true;
                     e.target.setVolume(volume);
-                    // Auto-play on load
                     e.target.playVideo();
+                    // Pull authoritative state: the player is usually ready well
+                    // after the initial video:state message was handled.
+                    sendWsMessage({ type: "video:sync_request" });
                 },
                 onStateChange: handlePlayerStateChange,
             },
         });
     }
 
-    function handlePlayerStateChange(event) {
-        if (ignoreNextEvent.current) {
-            ignoreNextEvent.current = false;
-            return;
+    /**
+     * Suppress outbound sync events for a short window.
+     *
+     * The old single `ignoreNextEvent` boolean was consumed by the first event,
+     * but applying a remote command fires several (BUFFERING, then PLAYING),
+     * so the extras were echoed straight back to the room and bounced between
+     * clients. A time window absorbs the whole burst.
+     */
+    function applyRemote(fn) {
+        suppressPlayerEventsUntil.current = Date.now() + 1200;
+        try {
+            fn();
+        } catch (err) {
+            console.warn("remote video command failed", err);
         }
-        if (!canControlVideo) return;
+    }
+
+    function handlePlayerStateChange(event) {
+        if (Date.now() < suppressPlayerEventsUntil.current) return;
+        const controllable = roleRef.current === "admin" || roleRef.current === "mod";
+        if (!controllable) return;
 
         const state = event.data;
         const currentTime = playerRef.current?.getCurrentTime() || 0;
@@ -239,7 +276,7 @@ export default function RoomPage() {
         // Detect seeking
         if (state === window.YT.PlayerState.BUFFERING) {
             setTimeout(() => {
-                if (playerRef.current) {
+                if (playerRef.current && Date.now() >= suppressPlayerEventsUntil.current) {
                     const newTime = playerRef.current.getCurrentTime();
                     if (Math.abs(newTime - currentTime) > 2) {
                         sendWsMessage({ type: "video:seek", timestamp: newTime });
@@ -275,15 +312,20 @@ export default function RoomPage() {
                     break;
 
                 case "video:play":
-                    if (playerRef.current && playerReady.current) {
-                        ignoreNextEvent.current = true;
-                        playerRef.current.seekTo(msg.timestamp, true);
-                        playerRef.current.playVideo();
-                    }
-                    if (uploadVideoRef.current) {
-                        uploadVideoRef.current.currentTime = msg.timestamp;
-                        uploadVideoRef.current.play().catch(() => {});
-                    }
+                    applyRemote(() => {
+                        if (playerRef.current && playerReady.current) {
+                            playerRef.current.seekTo(msg.timestamp, true);
+                            playerRef.current.playVideo();
+                        }
+                        const el = uploadVideoRef.current;
+                        if (el) {
+                            suppressUploadEventsUntil.current = Date.now() + 1200;
+                            if (Math.abs(el.currentTime - msg.timestamp) > 0.5) {
+                                el.currentTime = msg.timestamp;
+                            }
+                            el.play().catch(() => setPlaybackBlocked(true));
+                        }
+                    });
                     setMessages((prev) => [
                         ...prev,
                         { type: "system", content: `${msg.username} played the video` },
@@ -291,15 +333,20 @@ export default function RoomPage() {
                     break;
 
                 case "video:pause":
-                    if (playerRef.current && playerReady.current) {
-                        ignoreNextEvent.current = true;
-                        playerRef.current.seekTo(msg.timestamp, true);
-                        playerRef.current.pauseVideo();
-                    }
-                    if (uploadVideoRef.current) {
-                        uploadVideoRef.current.currentTime = msg.timestamp;
-                        uploadVideoRef.current.pause();
-                    }
+                    applyRemote(() => {
+                        if (playerRef.current && playerReady.current) {
+                            playerRef.current.seekTo(msg.timestamp, true);
+                            playerRef.current.pauseVideo();
+                        }
+                        const el = uploadVideoRef.current;
+                        if (el) {
+                            suppressUploadEventsUntil.current = Date.now() + 1200;
+                            if (Math.abs(el.currentTime - msg.timestamp) > 0.5) {
+                                el.currentTime = msg.timestamp;
+                            }
+                            el.pause();
+                        }
+                    });
                     setMessages((prev) => [
                         ...prev,
                         { type: "system", content: `${msg.username} paused the video` },
@@ -307,53 +354,129 @@ export default function RoomPage() {
                     break;
 
                 case "video:seek":
-                    if (playerRef.current && playerReady.current) {
-                        ignoreNextEvent.current = true;
-                        playerRef.current.seekTo(msg.timestamp, true);
-                    }
-                    if (uploadVideoRef.current) {
-                        uploadVideoRef.current.currentTime = msg.timestamp;
-                    }
-                    break;
-
-                case "video:uploaded":
-                    setUploadedVideoUrl(msg.url);
-                    showToast("Video uploaded by host");
-                    break;
-
-                case "screen:start":
-                case "screen:stop":
-                case "screen:offer":
-                case "screen:answer":
-                case "screen:ice":
-                case "screen:request":
+                    applyRemote(() => {
+                        if (playerRef.current && playerReady.current) {
+                            playerRef.current.seekTo(msg.timestamp, true);
+                        }
+                        const el = uploadVideoRef.current;
+                        if (el) {
+                            suppressUploadEventsUntil.current = Date.now() + 1200;
+                            el.currentTime = msg.timestamp;
+                        }
+                    });
                     break;
 
                 case "video:state":
-                    if (playerRef.current && playerReady.current) {
-                        ignoreNextEvent.current = true;
-                        playerRef.current.seekTo(msg.timestamp, true);
-                        if (msg.is_playing) {
-                            playerRef.current.playVideo();
-                        } else {
-                            playerRef.current.pauseVideo();
+                    applyRemote(() => {
+                        if (playerRef.current && playerReady.current) {
+                            playerRef.current.seekTo(msg.timestamp, true);
+                            if (msg.is_playing) playerRef.current.playVideo();
+                            else playerRef.current.pauseVideo();
                         }
+                        const el = uploadVideoRef.current;
+                        if (el) {
+                            suppressUploadEventsUntil.current = Date.now() + 1200;
+                            if (Math.abs(el.currentTime - msg.timestamp) > 0.5) {
+                                el.currentTime = msg.timestamp;
+                            }
+                            if (msg.is_playing) el.play().catch(() => setPlaybackBlocked(true));
+                            else el.pause();
+                        }
+                    });
+                    if (msg.video_url && msg.video_url !== room?.video_url) {
+                        setRoom((prev) => (prev ? { ...prev, video_url: msg.video_url } : prev));
                     }
                     if (msg.volume !== undefined) {
                         setVolume(msg.volume);
                         if (playerRef.current && playerReady.current) {
                             playerRef.current.setVolume(msg.volume);
                         }
+                        if (uploadVideoRef.current) {
+                            uploadVideoRef.current.volume = msg.volume / 100;
+                        }
                     }
                     break;
 
-                case "video:url_change":
-                    if (playerRef.current && playerReady.current) {
-                        const newId = extractVideoId(msg.video_url);
-                        if (newId) {
-                            playerRef.current.loadVideoById(newId);
+                case "video:uploaded":
+                    if (msg.url) setUploadedVideoUrl(msg.url);
+                    showToast(`${msg.username || "The host"} uploaded a video`);
+                    break;
+
+                /* ── Screen share signaling (was an empty no-op before) ── */
+
+                case "screen:start":
+                    // Someone else began sharing. Ask them to stream to us.
+                    if (msg.username && msg.username !== username) {
+                        if (isScreenSharingRef.current) stopScreenShare({ notify: false });
+                        setScreenSharer(msg.username);
+                        setMessages((prev) => [
+                            ...prev,
+                            { type: "system", content: `${msg.username} started sharing their screen` },
+                        ]);
+                        sendWsMessage({ type: "screen:request" });
+                    }
+                    break;
+
+                case "screen:stop":
+                    if (msg.username && msg.username === username) break;
+                    if (msg.username) {
+                        setMessages((prev) => [
+                            ...prev,
+                            { type: "system", content: `${msg.username} stopped sharing their screen` },
+                        ]);
+                    }
+                    clearRemoteScreen();
+                    break;
+
+                case "screen:request":
+                    // Sharer side: a viewer wants the stream.
+                    if (isScreenSharingRef.current && msg.from && msg.from !== username) {
+                        await createScreenOffer(msg.from);
+                    }
+                    break;
+
+                case "screen:offer":
+                    await handleScreenOffer(msg.from, msg.sdp);
+                    break;
+
+                case "screen:answer": {
+                    const entry = screenPeers.current[msg.from];
+                    if (entry) {
+                        try {
+                            await entry.pc.setRemoteDescription(new RTCSessionDescription(msg.sdp));
+                            await flushScreenCandidates(msg.from);
+                        } catch (err) {
+                            console.error("screen answer apply failed", err);
                         }
                     }
+                    break;
+                }
+
+                case "screen:ice": {
+                    const entry = screenPeers.current[msg.from];
+                    if (!entry || !msg.candidate) break;
+                    if (entry.pc.remoteDescription?.type) {
+                        try {
+                            await entry.pc.addIceCandidate(new RTCIceCandidate(msg.candidate));
+                        } catch (err) {
+                            console.warn("addIceCandidate failed", err);
+                        }
+                    } else {
+                        entry.pending.push(msg.candidate);
+                    }
+                    break;
+                }
+
+                case "video:url_change":
+                    // Keep room state in sync too, otherwise a later player
+                    // remount rebuilds with the previous video id.
+                    setRoom((prev) => (prev ? { ...prev, video_url: msg.video_url } : prev));
+                    applyRemote(() => {
+                        if (playerRef.current && playerReady.current) {
+                            const newId = extractVideoId(msg.video_url);
+                            if (newId) playerRef.current.loadVideoById(newId);
+                        }
+                    });
                     setMessages((prev) => [
                         ...prev,
                         { type: "system", content: `${msg.username} changed the video` },
@@ -364,6 +487,9 @@ export default function RoomPage() {
                     setVolume(msg.volume);
                     if (playerRef.current && playerReady.current) {
                         playerRef.current.setVolume(msg.volume);
+                    }
+                    if (uploadVideoRef.current) {
+                        uploadVideoRef.current.volume = msg.volume / 100;
                     }
                     break;
 
@@ -380,18 +506,26 @@ export default function RoomPage() {
                     break;
 
                 case "room:user_left":
-                    setParticipants(normalizeParticipants(msg.participants));
-                    setMessages((prev) => [
-                        ...prev,
-                        { type: "system", content: `${msg.username} left the room` },
-                    ]);
-                    break;
-
                 case "room:user_kicked":
                     setParticipants(normalizeParticipants(msg.participants));
+                    // Release the per-peer resources we were holding for them,
+                    // otherwise dead RTCPeerConnections and <audio> nodes pile up.
+                    releasePeerResources(msg.username);
+                    setVoiceUsers((prev) => {
+                        if (!(msg.username in prev)) return prev;
+                        const next = { ...prev };
+                        delete next[msg.username];
+                        return next;
+                    });
+                    setTypingUsers((prev) => prev.filter((u) => u !== msg.username));
                     setMessages((prev) => [
                         ...prev,
-                        { type: "system", content: `${msg.username} was kicked by ${msg.by}` },
+                        {
+                            type: "system",
+                            content: msg.type === "room:user_kicked"
+                                ? `${msg.username} was kicked by ${msg.by}`
+                                : `${msg.username} left the room`,
+                        },
                     ]);
                     break;
 
@@ -434,44 +568,99 @@ export default function RoomPage() {
 
                 // ── Voice Chat WebRTC Signaling ──
                 case "voice:offer": {
-                    const pc = createPeer(msg.from, false);
-                    await pc.setRemoteDescription(new RTCSessionDescription(msg.sdp));
-                    const answer = await pc.createAnswer();
-                    await pc.setLocalDescription(answer);
-                    sendWsMessage({ type: "voice:answer", target: msg.from, sdp: answer });
+                    try {
+                        const pc = createPeer(msg.from, false);
+                        await pc.setRemoteDescription(new RTCSessionDescription(msg.sdp));
+                        await flushVoiceCandidates(msg.from);
+                        const answer = await pc.createAnswer();
+                        await pc.setLocalDescription(answer);
+                        sendWsMessage({
+                            type: "voice:answer",
+                            target: msg.from,
+                            sdp: pc.localDescription,
+                        });
+                    } catch (err) {
+                        console.error("voice answer failed", err);
+                        releasePeerResources(msg.from);
+                    }
                     break;
                 }
                 case "voice:answer": {
                     const pc = peerConnections.current[msg.from];
-                    if (pc) await pc.setRemoteDescription(new RTCSessionDescription(msg.sdp));
+                    if (!pc) break;
+                    try {
+                        await pc.setRemoteDescription(new RTCSessionDescription(msg.sdp));
+                        await flushVoiceCandidates(msg.from);
+                    } catch (err) {
+                        console.error("voice answer apply failed", err);
+                    }
                     break;
                 }
                 case "voice:ice": {
+                    if (!msg.candidate) break;
                     const pc = peerConnections.current[msg.from];
-                    if (pc && msg.candidate) {
-                        await pc.addIceCandidate(new RTCIceCandidate(msg.candidate));
+                    // Candidates routinely beat the SDP through the relay; adding
+                    // one before setRemoteDescription throws and silently kills
+                    // connectivity, so queue until the description lands.
+                    if (pc?.remoteDescription?.type) {
+                        try {
+                            await pc.addIceCandidate(new RTCIceCandidate(msg.candidate));
+                        } catch (err) {
+                            console.warn("voice addIceCandidate failed", err);
+                        }
+                    } else {
+                        pendingVoiceIce.current[msg.from] =
+                            pendingVoiceIce.current[msg.from] || [];
+                        pendingVoiceIce.current[msg.from].push(msg.candidate);
                     }
                     break;
                 }
                 case "voice:state":
-                    setVoiceUsers(prev => ({
+                    setVoiceUsers((prev) => ({
                         ...prev,
-                        [msg.username]: { muted: msg.muted, active: msg.active }
+                        [msg.username]: { muted: msg.muted, active: msg.active },
                     }));
+                    // Someone joined voice while we're already live: whoever has
+                    // the smaller name dials, so exactly one offer is created.
+                    if (
+                        msg.active &&
+                        msg.username !== username &&
+                        voiceActiveRef.current &&
+                        !peerConnections.current[msg.username] &&
+                        username < msg.username
+                    ) {
+                        createPeer(msg.username, true);
+                    }
+                    if (!msg.active) releasePeerResources(msg.username);
                     break;
                 case "voice:force_mute":
                     // Admin force-muted us
                     if (localStream.current) {
-                        localStream.current.getAudioTracks().forEach(t => t.enabled = false);
+                        localStream.current.getAudioTracks().forEach((t) => { t.enabled = false; });
                     }
                     setVoiceMuted(true);
                     showToast(`You were muted by ${msg.by}`);
-                    sendWsMessage({ type: "voice:state", muted: true, active: voiceActive });
+                    // voiceActive is captured from the render this handler was
+                    // created in and goes stale; the ref always reflects now.
+                    sendWsMessage({ type: "voice:state", muted: true, active: voiceActiveRef.current });
                     break;
             }
         };
 
-        ws.onclose = () => {
+        ws.onclose = (event) => {
+            // A close we asked for (unmount, re-render, kick) must not schedule a
+            // reconnect. Previously the cleanup below called close(), this handler
+            // fired afterwards, and a brand-new socket was opened for a component
+            // that no longer existed — one zombie connection per navigation.
+            if (wsIntentionalClose.current || wsRef.current !== ws) return;
+
+            if (event.code === 4009) {
+                // Username already in the room — reconnecting would loop forever.
+                setConnectionState("disconnected");
+                setError("That name is already taken in this room. Pick another one.");
+                return;
+            }
+
             setConnectionState("reconnecting");
             const delay = Math.min(1000 * Math.pow(2, reconnectAttempt.current), 30000);
             reconnectAttempt.current++;
@@ -486,12 +675,54 @@ export default function RoomPage() {
     }, [joined, username, roomId]);
 
     useEffect(() => {
+        wsIntentionalClose.current = false;
         connectWs();
         return () => {
-            if (reconnectTimer.current) clearTimeout(reconnectTimer.current);
-            if (wsRef.current) wsRef.current.close();
+            wsIntentionalClose.current = true;
+            if (reconnectTimer.current) {
+                clearTimeout(reconnectTimer.current);
+                reconnectTimer.current = null;
+            }
+            if (wsRef.current) {
+                wsRef.current.close();
+                wsRef.current = null;
+            }
         };
     }, [connectWs]);
+
+    /* ── Release every media resource on unmount ─── */
+    useEffect(() => {
+        return () => {
+            if (toastTimer.current) clearTimeout(toastTimer.current);
+            if (typingTimeout.current) clearTimeout(typingTimeout.current);
+            if (screenStreamRef.current) {
+                screenStreamRef.current.getTracks().forEach((t) => t.stop());
+                screenStreamRef.current = null;
+            }
+            if (localStream.current) {
+                localStream.current.getTracks().forEach((t) => t.stop());
+                localStream.current = null;
+            }
+            Object.values(screenPeers.current).forEach((entry) => {
+                try { entry?.pc?.close(); } catch { }
+            });
+            screenPeers.current = {};
+            Object.values(peerConnections.current).forEach((pc) => {
+                try { pc.close(); } catch { }
+            });
+            peerConnections.current = {};
+            Object.values(remoteAudios.current).forEach((a) => {
+                a.pause();
+                a.srcObject = null;
+                a.remove();
+            });
+            remoteAudios.current = {};
+            if (playerRef.current?.destroy) {
+                try { playerRef.current.destroy(); } catch { }
+                playerRef.current = null;
+            }
+        };
+    }, []);
 
     /* ── Auto-scroll ─────────────────────────────── */
     useEffect(() => {
@@ -516,7 +747,9 @@ export default function RoomPage() {
 
     function showToast(text) {
         setToast(text);
-        setTimeout(() => setToast(""), 3000);
+        // Without clearing, a second toast inherits the first timer and vanishes early.
+        if (toastTimer.current) clearTimeout(toastTimer.current);
+        toastTimer.current = setTimeout(() => setToast(""), 3000);
     }
 
     function handleSendMessage(e) {
@@ -586,142 +819,201 @@ export default function RoomPage() {
         }
     }
 
-    // Fetch working ICE servers (STUN + TURN) from metered.ca free tier.
-    // Falls back to Google STUN only if the fetch fails.
-    async function getIceServers() {
-        const METERED_API = process.env.NEXT_PUBLIC_METERED_API_URL;
-        if (METERED_API) {
-            try {
-                const res = await fetch(METERED_API);
-                if (res.ok) {
-                    const servers = await res.json();
-                    if (Array.isArray(servers) && servers.length) return servers;
-                }
-            } catch {}
-        }
+    /* ── Screen Share (native WebRTC over our own WS signaling) ──────────
+     *
+     * Replaces the previous PeerJS + HTTP-polling implementation, which could
+     * never work: the viewer called `peer.call(id, new MediaStream())`, and an
+     * empty stream produces an SDP offer with zero m-lines. An answer may not
+     * introduce media sections the offer didn't have, so the sharer's
+     * `call.answer(screenStream)` had nowhere to attach its tracks and the
+     * viewer's `stream` event never fired.
+     *
+     * The side that owns the media must be the offerer. So: viewers announce
+     * themselves with `screen:request`, and the sharer creates one
+     * RTCPeerConnection per viewer and offers into it.
+     */
+
+    function getIceServers() {
+        const extra = process.env.NEXT_PUBLIC_TURN_URL
+            ? [{
+                urls: process.env.NEXT_PUBLIC_TURN_URL,
+                username: process.env.NEXT_PUBLIC_TURN_USERNAME,
+                credential: process.env.NEXT_PUBLIC_TURN_CREDENTIAL,
+            }]
+            : [];
         return [
-            { urls: "stun:stun.l.google.com:19302" },
-            {
-                urls: "turn:openrelay.metered.ca:443",
-                username: "openrelayproject",
-                credential: "openrelayproject",
-            },
+            { urls: ["stun:stun.l.google.com:19302", "stun:stun1.l.google.com:19302"] },
+            ...extra,
         ];
     }
 
-    /* Screen Share - PeerJS + HTTP polling (bypasses broken WS broadcast) */
-    async function startScreenShare() {
+    function closeScreenPeer(peerName) {
+        const entry = screenPeers.current[peerName];
+        if (!entry) return;
+        try { entry.pc.close(); } catch { }
+        delete screenPeers.current[peerName];
+    }
+
+    function closeAllScreenPeers() {
+        Object.keys(screenPeers.current).forEach(closeScreenPeer);
+        screenPeers.current = {};
+    }
+
+    /** Sharer side: build a send-only connection for one viewer and offer. */
+    async function createScreenOffer(viewer) {
+        const stream = screenStreamRef.current;
+        if (!stream) return;
+
+        closeScreenPeer(viewer);
+        const pc = new RTCPeerConnection({ iceServers: getIceServers() });
+        screenPeers.current[viewer] = { pc, pending: [] };
+
+        stream.getTracks().forEach((track) => pc.addTrack(track, stream));
+
+        pc.onicecandidate = (e) => {
+            if (e.candidate) {
+                sendWsMessage({ type: "screen:ice", target: viewer, candidate: e.candidate });
+            }
+        };
+        pc.onconnectionstatechange = () => {
+            if (["failed", "closed"].includes(pc.connectionState)) closeScreenPeer(viewer);
+        };
+
         try {
-            const stream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
-            setScreenStream(stream);
-            setIsScreenSharing(true);
-            setScreenSharer(username);
-            screenStreamRef.current = stream;
-            isScreenSharingRef.current = true;
-
-            const iceServers = await getIceServers();
-            const { Peer } = await import('peerjs');
-            const peer = new Peer({ config: { iceServers } });
-            screenPeers.current._peer = peer;
-
-            peer.on('open', async (id) => {
-                // Store peer ID in room data via HTTP (reliable, no WS needed)
-                await fetch(`${getApiUrl()}/api/rooms/${roomId}/screen`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ peer_id: id })
-                });
-            });
-
-            // When a viewer calls us, answer with our stream
-            peer.on('call', (call) => {
-                call.answer(screenStreamRef.current);
-            });
-
-            stream.getVideoTracks()[0].onended = () => stopScreenShare();
-        } catch (e) {
-            setToast("Screen share cancelled");
+            const offer = await pc.createOffer();
+            await pc.setLocalDescription(offer);
+            sendWsMessage({ type: "screen:offer", target: viewer, sdp: pc.localDescription });
+        } catch (err) {
+            console.error("screen offer failed", err);
+            closeScreenPeer(viewer);
         }
     }
 
-    async function stopScreenShare() {
+    /** Viewer side: accept the sharer's offer with a receive-only connection. */
+    async function handleScreenOffer(from, sdp) {
+        closeScreenPeer(from);
+        const pc = new RTCPeerConnection({ iceServers: getIceServers() });
+        screenPeers.current[from] = { pc, pending: [] };
+
+        pc.ontrack = (e) => {
+            // Both audio and video tracks arrive on the same stream.
+            setRemoteScreenStream(e.streams[0]);
+            setScreenSharer(from);
+        };
+        pc.onicecandidate = (e) => {
+            if (e.candidate) {
+                sendWsMessage({ type: "screen:ice", target: from, candidate: e.candidate });
+            }
+        };
+        pc.onconnectionstatechange = () => {
+            if (pc.connectionState === "failed") {
+                showToast("Screen stream connection failed — retrying");
+                closeScreenPeer(from);
+                sendWsMessage({ type: "screen:request" });
+            }
+        };
+
+        try {
+            await pc.setRemoteDescription(new RTCSessionDescription(sdp));
+            await flushScreenCandidates(from);
+            const answer = await pc.createAnswer();
+            await pc.setLocalDescription(answer);
+            sendWsMessage({ type: "screen:answer", target: from, sdp: pc.localDescription });
+        } catch (err) {
+            console.error("screen answer failed", err);
+            closeScreenPeer(from);
+        }
+    }
+
+    /** ICE can arrive before the remote description — buffer and replay. */
+    async function flushScreenCandidates(peerName) {
+        const entry = screenPeers.current[peerName];
+        if (!entry) return;
+        const queued = entry.pending.splice(0);
+        for (const candidate of queued) {
+            try {
+                await entry.pc.addIceCandidate(new RTCIceCandidate(candidate));
+            } catch (err) {
+                console.warn("addIceCandidate failed", err);
+            }
+        }
+    }
+
+    async function startScreenShare() {
+        if (!navigator.mediaDevices?.getDisplayMedia) {
+            showToast("Screen sharing needs a secure (https or localhost) origin");
+            return;
+        }
+        let stream;
+        try {
+            stream = await navigator.mediaDevices.getDisplayMedia({
+                video: { frameRate: { ideal: 30, max: 60 } },
+                audio: true,
+            });
+        } catch {
+            showToast("Screen share cancelled");
+            return;
+        }
+
+        screenStreamRef.current = stream;
+        isScreenSharingRef.current = true;
+        setScreenStream(stream);
+        setIsScreenSharing(true);
+        setScreenSharer(username);
+        setRemoteScreenStream(null);
+
+        // "Stop sharing" in the browser's own bar must tear everything down too.
+        stream.getVideoTracks().forEach((t) => {
+            t.onended = () => stopScreenShare();
+        });
+
+        // Announce; every viewer replies with screen:request and we offer to each.
+        sendWsMessage({ type: "screen:start" });
+    }
+
+    function stopScreenShare({ notify = true } = {}) {
         if (screenStreamRef.current) {
-            screenStreamRef.current.getTracks().forEach(t => t.stop());
+            screenStreamRef.current.getTracks().forEach((t) => {
+                t.onended = null;
+                t.stop();
+            });
         }
-        if (screenPeers.current._peer) {
-            screenPeers.current._peer.destroy();
-        }
-        screenPeers.current = {};
+        closeAllScreenPeers();
+        screenStreamRef.current = null;
+        isScreenSharingRef.current = false;
         setScreenStream(null);
         setIsScreenSharing(false);
         setScreenSharer(null);
         setRemoteScreenStream(null);
-        screenStreamRef.current = null;
-        isScreenSharingRef.current = false;
-        // Clear peer ID from server
-        await fetch(`${getApiUrl()}/api/rooms/${roomId}/screen`, {
-            method: 'DELETE'
-        }).catch(() => {});
+        setScreenBlocked(false);
+        if (notify) sendWsMessage({ type: "screen:stop" });
     }
 
-    // Poll for screen share peer ID (members only)
-    useEffect(() => {
-        if (!joined || !room || room.mode !== "screenshare" || isScreenSharingRef.current) return;
-
-        let active = true;
-        let connected = false;
-
-        async function pollForScreen() {
-            while (active && !connected) {
-                try {
-                    const res = await fetch(`${getApiUrl()}/api/rooms/${roomId}/screen`);
-                    if (res.ok) {
-                        const data = await res.json();
-                        if (data.peer_id && !connected) {
-                            connected = true;
-                            setScreenSharer(data.sharer || "Host");
-                            connectToScreenShare(data.peer_id);
-                            return;
-                        }
-                    }
-                } catch {}
-                await new Promise(r => setTimeout(r, 2000));
-            }
-        }
-        pollForScreen();
-        return () => { active = false; };
-    }, [joined, room]);
-
-    async function connectToScreenShare(peerId) {
-        try {
-            const iceServers = await getIceServers();
-            const { Peer } = await import('peerjs');
-            const peer = new Peer({ config: { iceServers } });
-            screenPeers.current._peer = peer;
-
-            peer.on('open', () => {
-                const call = peer.call(peerId, new MediaStream());
-                call.on('stream', (remoteStream) => {
-                    setRemoteScreenStream(remoteStream);
-                });
-                call.on('error', () => setToast("Stream connection failed"));
-            });
-            peer.on('error', (err) => setToast("Connection error: " + err.type));
-        } catch (e) {
-            setToast("Failed to connect");
-        }
+    /** Viewer teardown when the sharer stops or drops. */
+    function clearRemoteScreen() {
+        closeAllScreenPeers();
+        setRemoteScreenStream(null);
+        setScreenSharer(null);
+        setScreenBlocked(false);
     }
-
-    function createScreenPeer() { }
 
     /* Upload Video */
     async function handleFileUpload(e) {
         const file = e.target.files[0];
         if (!file) return;
+        // Allow re-selecting the same file after a failure.
+        e.target.value = "";
 
         setUploadProgress(0);
         const formData = new FormData();
         formData.append("file", file);
+
+        // These used raw setToast, which never scheduled the clear timer, so the
+        // message stayed on screen forever.
+        const fail = (reason) => {
+            setUploadProgress(null);
+            showToast(reason);
+        };
 
         try {
             const xhr = new XMLHttpRequest();
@@ -732,40 +1024,55 @@ export default function RoomPage() {
             };
             xhr.onload = () => {
                 if (xhr.status === 200) {
-                    const data = JSON.parse(xhr.responseText);
-                    setUploadedVideoUrl(`${getApiUrl()}${data.url}`);
-                    setUploadProgress(null);
-                    setToast("Video uploaded");
-                    sendWsMessage({ type: "video:uploaded", url: `${getApiUrl()}${data.url}` });
+                    try {
+                        const data = JSON.parse(xhr.responseText);
+                        const url = `${getApiUrl()}${data.url}`;
+                        setUploadedVideoUrl(url);
+                        setUploadProgress(null);
+                        showToast("Video uploaded");
+                        sendWsMessage({ type: "video:uploaded", url });
+                    } catch {
+                        fail("Upload succeeded but the response was unreadable");
+                    }
                 } else {
-                    setUploadProgress(null);
-                    setToast("Upload failed");
+                    let detail = "Upload failed";
+                    try {
+                        detail = JSON.parse(xhr.responseText).detail || detail;
+                    } catch { }
+                    fail(detail);
                 }
             };
-            xhr.onerror = () => { setUploadProgress(null); setToast("Upload failed"); };
+            xhr.onerror = () => fail("Upload failed");
             xhr.open("POST", `${getApiUrl()}/api/rooms/${roomId}/upload`);
             xhr.send(formData);
         } catch {
-            setUploadProgress(null);
-            setToast("Upload failed");
+            fail("Upload failed");
         }
     }
 
-    /* Upload video sync controls */
+    /* Upload video sync controls.
+     * `suppressUploadEventsUntil` is set whenever we apply a remote state to the
+     * <video> element. Without this guard the element's own play/pause/seeked
+     * events fire and get rebroadcast, which ping-pongs between clients. */
+    function isRemoteEcho() {
+        return Date.now() < suppressUploadEventsUntil.current;
+    }
+
     function handleUploadVideoPlay() {
-        if (!canControlVideo) return;
+        setPlaybackBlocked(false);
+        if (!canControlVideo || isRemoteEcho()) return;
         const time = uploadVideoRef.current?.currentTime || 0;
         sendWsMessage({ type: "video:play", timestamp: time });
     }
 
     function handleUploadVideoPause() {
-        if (!canControlVideo) return;
+        if (!canControlVideo || isRemoteEcho()) return;
         const time = uploadVideoRef.current?.currentTime || 0;
         sendWsMessage({ type: "video:pause", timestamp: time });
     }
 
     function handleUploadVideoSeek() {
-        if (!canControlVideo) return;
+        if (!canControlVideo || isRemoteEcho()) return;
         const time = uploadVideoRef.current?.currentTime || 0;
         sendWsMessage({ type: "video:seek", timestamp: time });
     }
@@ -792,14 +1099,30 @@ export default function RoomPage() {
     }
 
     /* ── WebRTC Voice Chat ────────────────────────── */
+
+    /** Tear down everything we hold for one peer (voice + screen). */
+    function releasePeerResources(peerName) {
+        if (!peerName) return;
+        const pc = peerConnections.current[peerName];
+        if (pc) {
+            try { pc.close(); } catch { }
+            delete peerConnections.current[peerName];
+        }
+        const audio = remoteAudios.current[peerName];
+        if (audio) {
+            audio.pause();
+            audio.srcObject = null;
+            audio.remove();
+            delete remoteAudios.current[peerName];
+        }
+        delete pendingVoiceIce.current[peerName];
+        closeScreenPeer(peerName);
+    }
+
     function createPeer(targetUsername, isInitiator) {
-        const pc = new RTCPeerConnection({
-            iceServers: [
-                { urls: "stun:stun.l.google.com:19302" },
-                { urls: "stun:stun1.l.google.com:19302" },
-            ]
-        });
+        const pc = new RTCPeerConnection({ iceServers: getIceServers() });
         peerConnections.current[targetUsername] = pc;
+        pendingVoiceIce.current[targetUsername] = pendingVoiceIce.current[targetUsername] || [];
 
         pc.onicecandidate = (e) => {
             if (e.candidate) {
@@ -808,57 +1131,126 @@ export default function RoomPage() {
         };
 
         pc.ontrack = (e) => {
-            const audio = new Audio();
+            // Reuse one <audio> per peer. Creating a fresh detached Audio() on
+            // every track leaked elements and often never started playing, since
+            // an element outside the document can't recover from a blocked play().
+            let audio = remoteAudios.current[targetUsername];
+            if (!audio) {
+                audio = document.createElement("audio");
+                audio.autoplay = true;
+                audio.playsInline = true;
+                audio.style.display = "none";
+                document.body.appendChild(audio);
+                remoteAudios.current[targetUsername] = audio;
+            }
             audio.srcObject = e.streams[0];
-            audio.autoplay = true;
-            remoteAudios.current[targetUsername] = audio;
+            audio.play().catch(() => {
+                showToast("Click anywhere to enable voice audio");
+            });
+        };
+
+        pc.onconnectionstatechange = () => {
+            if (["failed", "closed"].includes(pc.connectionState)) {
+                releasePeerResources(targetUsername);
+            }
         };
 
         if (localStream.current) {
-            localStream.current.getTracks().forEach(track => {
+            localStream.current.getTracks().forEach((track) => {
                 pc.addTrack(track, localStream.current);
             });
         }
 
         if (isInitiator) {
-            pc.createOffer().then(offer => {
-                pc.setLocalDescription(offer);
-                sendWsMessage({ type: "voice:offer", target: targetUsername, sdp: offer });
-            });
+            (async () => {
+                try {
+                    const offer = await pc.createOffer();
+                    // Must await: sending before setLocalDescription resolves can
+                    // ship an SDP the local peer hasn't committed to yet.
+                    await pc.setLocalDescription(offer);
+                    sendWsMessage({
+                        type: "voice:offer",
+                        target: targetUsername,
+                        sdp: pc.localDescription,
+                    });
+                } catch (err) {
+                    console.error("voice offer failed", err);
+                    releasePeerResources(targetUsername);
+                }
+            })();
         }
 
         return pc;
     }
 
+    async function flushVoiceCandidates(peerName) {
+        const pc = peerConnections.current[peerName];
+        const queued = pendingVoiceIce.current[peerName]?.splice(0) || [];
+        if (!pc) return;
+        for (const candidate of queued) {
+            try {
+                await pc.addIceCandidate(new RTCIceCandidate(candidate));
+            } catch (err) {
+                console.warn("voice addIceCandidate failed", err);
+            }
+        }
+    }
+
     async function toggleVoice() {
         if (!voiceActive) {
+            let stream;
             try {
-                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-                localStream.current = stream;
-                setVoiceActive(true);
-                setVoiceMuted(false);
-                sendWsMessage({ type: "voice:state", muted: false, active: true });
-                // Connect to all existing participants
-                participants.forEach(p => {
-                    const pName = typeof p === "string" ? p : p?.username;
-                    if (pName && pName !== username && !peerConnections.current[pName]) {
-                        createPeer(pName, true);
-                    }
+                stream = await navigator.mediaDevices.getUserMedia({
+                    audio: { echoCancellation: true, noiseSuppression: true },
                 });
-                showToast("Voice chat joined");
             } catch {
                 showToast("Microphone access denied");
+                return;
             }
+            localStream.current = stream;
+            voiceActiveRef.current = true;
+            setVoiceActive(true);
+            setVoiceMuted(false);
+            sendWsMessage({ type: "voice:state", muted: false, active: true });
+
+            // Rebuild from scratch: a connection created while we had no mic has
+            // no audio track and can never gain one without renegotiation, which
+            // is why users who answered before joining could hear but not speak.
+            Object.keys(peerConnections.current).forEach((name) => {
+                const pc = peerConnections.current[name];
+                if (pc) { try { pc.close(); } catch { } }
+                delete peerConnections.current[name];
+                delete pendingVoiceIce.current[name];
+            });
+
+            participants.forEach((p) => {
+                const pName = typeof p === "string" ? p : p?.username;
+                if (!pName || pName === username) return;
+                // Only dial peers that are actually in voice, and let the
+                // lexicographically smaller name offer so both sides don't
+                // offer at once (glare).
+                if (!voiceUsers[pName]?.active) return;
+                if (username < pName) createPeer(pName, true);
+            });
+            showToast("Voice chat joined");
         } else {
-            // Leave voice
             if (localStream.current) {
-                localStream.current.getTracks().forEach(t => t.stop());
+                localStream.current.getTracks().forEach((t) => t.stop());
                 localStream.current = null;
             }
-            Object.values(peerConnections.current).forEach(pc => pc.close());
-            peerConnections.current = {};
-            Object.values(remoteAudios.current).forEach(a => { a.pause(); a.srcObject = null; });
+            Object.keys(peerConnections.current).forEach((name) => {
+                const pc = peerConnections.current[name];
+                if (pc) { try { pc.close(); } catch { } }
+                delete peerConnections.current[name];
+            });
+            Object.entries(remoteAudios.current).forEach(([, a]) => {
+                a.pause();
+                a.srcObject = null;
+                a.remove();
+            });
             remoteAudios.current = {};
+            pendingVoiceIce.current = {};
+            voiceActiveRef.current = false;
             setVoiceActive(false);
             setVoiceMuted(true);
             sendWsMessage({ type: "voice:state", muted: true, active: false });
@@ -869,7 +1261,7 @@ export default function RoomPage() {
     function toggleMic() {
         if (!localStream.current) return;
         const newMuted = !voiceMuted;
-        localStream.current.getAudioTracks().forEach(t => t.enabled = !newMuted);
+        localStream.current.getAudioTracks().forEach((t) => { t.enabled = !newMuted; });
         setVoiceMuted(newMuted);
         sendWsMessage({ type: "voice:state", muted: newMuted, active: true });
     }
@@ -1013,24 +1405,53 @@ export default function RoomPage() {
                         {room?.mode === "screenshare" && (
                             <div className="screenshare-wrapper">
                                 {isScreenSharing ? (
-                                    <video ref={screenVideoRef} autoPlay muted className="screenshare-video" />
+                                    <video
+                                        ref={screenVideoRef}
+                                        autoPlay
+                                        muted
+                                        playsInline
+                                        className="screenshare-video"
+                                    />
                                 ) : remoteScreenStream ? (
-                                    <video ref={remoteScreenRef} autoPlay className="screenshare-video" />
+                                    <>
+                                        <video
+                                            ref={remoteScreenRef}
+                                            autoPlay
+                                            playsInline
+                                            className="screenshare-video"
+                                        />
+                                        {screenBlocked && (
+                                            <button
+                                                className="screenshare-unblock"
+                                                onClick={() => {
+                                                    remoteScreenRef.current
+                                                        ?.play()
+                                                        .then(() => setScreenBlocked(false))
+                                                        .catch(() => { });
+                                                }}
+                                            >
+                                                Tap to play stream
+                                            </button>
+                                        )}
+                                    </>
                                 ) : (
                                     <div className="screenshare-placeholder">
-                                        {canControlVideo && !screenSharer ? (
+                                        {screenSharer && screenSharer !== username ? (
+                                            <>
+                                                <div className="spinner" />
+                                                <p>Connecting to {screenSharer}&apos;s screen...</p>
+                                            </>
+                                        ) : canControlVideo ? (
                                             <button className="btn-primary" onClick={startScreenShare}>
                                                 Share Your Screen
                                             </button>
-                                        ) : screenSharer ? (
-                                            <p>Connecting to {screenSharer}'s screen...</p>
                                         ) : (
-                                            <p>Waiting for host to start screen sharing...</p>
+                                            <p>Waiting for the host to start screen sharing...</p>
                                         )}
                                     </div>
                                 )}
                                 {isScreenSharing && (
-                                    <button className="screenshare-stop-btn" onClick={stopScreenShare}>
+                                    <button className="screenshare-stop-btn" onClick={() => stopScreenShare()}>
                                         Stop Sharing
                                     </button>
                                 )}
@@ -1041,15 +1462,31 @@ export default function RoomPage() {
                         {room?.mode === "upload" && (
                             <div className="upload-wrapper">
                                 {uploadedVideoUrl || room?.upload_filename ? (
-                                    <video
-                                        ref={uploadVideoRef}
-                                        src={uploadedVideoUrl || `${getApiUrl()}/api/rooms/${roomId}/video`}
-                                        className="upload-video"
-                                        controls={canControlVideo}
-                                        onPlay={handleUploadVideoPlay}
-                                        onPause={handleUploadVideoPause}
-                                        onSeeked={handleUploadVideoSeek}
-                                    />
+                                    <>
+                                        <video
+                                            ref={uploadVideoRef}
+                                            src={uploadedVideoUrl || `${getApiUrl()}/api/rooms/${roomId}/video`}
+                                            className="upload-video"
+                                            playsInline
+                                            controls={canControlVideo}
+                                            onPlay={handleUploadVideoPlay}
+                                            onPause={handleUploadVideoPause}
+                                            onSeeked={handleUploadVideoSeek}
+                                        />
+                                        {playbackBlocked && (
+                                            <button
+                                                className="screenshare-unblock"
+                                                onClick={() => {
+                                                    uploadVideoRef.current
+                                                        ?.play()
+                                                        .then(() => setPlaybackBlocked(false))
+                                                        .catch(() => { });
+                                                }}
+                                            >
+                                                Tap to start playback
+                                            </button>
+                                        )}
+                                    </>
                                 ) : (
                                     <div className="upload-placeholder">
                                         {canControlVideo ? (

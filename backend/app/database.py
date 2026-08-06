@@ -62,6 +62,17 @@ async def init_db():
             except Exception:
                 pass  # Column already exists
 
+        # Older deployments created avatar_color as VARCHAR(7), but the auth
+        # route stores generated HSL values such as hsl(222, 70%, 60%).
+        try:
+            if "postgresql" in DATABASE_URL:
+                await conn.execute(
+                    text("ALTER TABLE users ALTER COLUMN avatar_color TYPE VARCHAR(32)")
+                )
+                logger.info("Widened users.avatar_color to VARCHAR(32)")
+        except Exception:
+            pass  # Already migrated or database does not have the old schema
+
         # Make video_url nullable (was NOT NULL in old schema)
         try:
             if "postgresql" in DATABASE_URL:

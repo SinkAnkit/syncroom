@@ -12,7 +12,8 @@ class User(Base):
     email: Mapped[str] = mapped_column(String(255), unique=True, nullable=False, index=True)
     display_name: Mapped[str] = mapped_column(String(50), nullable=False)
     hashed_password: Mapped[str] = mapped_column(String(255), nullable=False)
-    avatar_color: Mapped[str] = mapped_column(String(7), default="#7c5cfc")
+    # Avatar colors are generated as values such as hsl(222, 70%, 60%).
+    avatar_color: Mapped[str] = mapped_column(String(32), default="#7c5cfc")
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )
