@@ -196,6 +196,8 @@ export default function RoomPage() {
         const el = remoteScreenRef.current;
         if (!el || !remoteScreenStream) return;
         if (el.srcObject !== remoteScreenStream) el.srcObject = remoteScreenStream;
+        // Honour the room volume on the freshly-mounted element.
+        el.volume = volume / 100;
         el.play()
             .then(() => setScreenBlocked(false))
             .catch(() => setScreenBlocked(true));
@@ -296,6 +298,13 @@ export default function RoomPage() {
         ws.onopen = () => {
             setConnectionState("connected");
             reconnectAttempt.current = 0;
+            // A dropped socket makes the server run our disconnect cleanup, which
+            // clears our screen share and tells viewers to stop. If we're still
+            // capturing locally after a reconnect, re-announce so viewers rebuild
+            // their streams instead of being left on a frozen last frame.
+            if (isScreenSharingRef.current) {
+                sendWsMessage({ type: "screen:start" });
+            }
         };
 
         ws.onmessage = async (event) => {
@@ -418,7 +427,16 @@ export default function RoomPage() {
                     break;
 
                 case "screen:stop":
-                    if (msg.username && msg.username === username) break;
+                    if (msg.username && msg.username === username) {
+                        // The server told *us* to stop. When we stopped
+                        // ourselves this is just the echo (isScreenSharingRef is
+                        // already false, so this is a no-op). But when an admin
+                        // demotes or force-stops us, this is the only signal we
+                        // get — tear down our own capture so we don't keep the
+                        // screen grabbed while everyone else has been cut off.
+                        if (isScreenSharingRef.current) stopScreenShare({ notify: false });
+                        break;
+                    }
                     if (msg.username) {
                         setMessages((prev) => [
                             ...prev,
@@ -491,6 +509,9 @@ export default function RoomPage() {
                     if (uploadVideoRef.current) {
                         uploadVideoRef.current.volume = msg.volume / 100;
                     }
+                    if (remoteScreenRef.current) {
+                        remoteScreenRef.current.volume = msg.volume / 100;
+                    }
                     break;
 
                 case "chat:message":
@@ -510,7 +531,10 @@ export default function RoomPage() {
                     setParticipants(normalizeParticipants(msg.participants));
                     // Release the per-peer resources we were holding for them,
                     // otherwise dead RTCPeerConnections and <audio> nodes pile up.
+                    // A peer who actually leaves the room releases *both* their
+                    // voice and screen connections; voice churn alone must not.
                     releasePeerResources(msg.username);
+                    closeScreenPeer(msg.username);
                     setVoiceUsers((prev) => {
                         if (!(msg.username in prev)) return prev;
                         const next = { ...prev };
@@ -550,6 +574,13 @@ export default function RoomPage() {
                     break;
 
                 case "error":
+                    // The server refused our screen share (no permission, or
+                    // someone else grabbed it first in a race). We optimistically
+                    // started capturing locally — undo that so we don't sit on a
+                    // live, un-broadcast capture behind a fake "Stop Sharing" UI.
+                    if (msg.code === "screen_denied" && isScreenSharingRef.current) {
+                        stopScreenShare({ notify: false });
+                    }
                     showToast(msg.message || "An error occurred");
                     break;
 
@@ -813,6 +844,11 @@ export default function RoomPage() {
         }
         if (uploadVideoRef.current) {
             uploadVideoRef.current.volume = v / 100;
+        }
+        // A shared screen can carry system audio; the slider has to drive it too,
+        // otherwise the volume control is a dead knob in screenshare mode.
+        if (remoteScreenRef.current) {
+            remoteScreenRef.current.volume = v / 100;
         }
         if (canControlVideo) {
             sendWsMessage({ type: "volume:change", volume: v });
@@ -1100,7 +1136,17 @@ export default function RoomPage() {
 
     /* ── WebRTC Voice Chat ────────────────────────── */
 
-    /** Tear down everything we hold for one peer (voice + screen). */
+    /**
+     * Tear down the *voice* resources we hold for one peer.
+     *
+     * This must NOT touch the screen-share peer: voice and screen are two
+     * independent RTCPeerConnections that happen to be keyed by the same
+     * username. Leaving voice, a failed voice offer, or a dropped voice
+     * connection previously called closeScreenPeer() here too, which ripped a
+     * live screen stream out from under every viewer the instant the sharer's
+     * voice state changed. Screen peers are released explicitly where a peer
+     * actually leaves the room (room:user_left / room:user_kicked).
+     */
     function releasePeerResources(peerName) {
         if (!peerName) return;
         const pc = peerConnections.current[peerName];
@@ -1116,7 +1162,6 @@ export default function RoomPage() {
             delete remoteAudios.current[peerName];
         }
         delete pendingVoiceIce.current[peerName];
-        closeScreenPeer(peerName);
     }
 
     function createPeer(targetUsername, isInitiator) {

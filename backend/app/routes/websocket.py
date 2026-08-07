@@ -548,13 +548,16 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str, username: str =
             elif msg_type == "screen:start":
                 if not can_control_video(current_role):
                     await manager.send_to(room_id, username, {
-                        "type": "error", "message": "No permission to share your screen",
+                        "type": "error",
+                        "code": "screen_denied",
+                        "message": "No permission to share your screen",
                     })
                     continue
                 active_sharer = await redis_client.get_screen_sharer(room_id)
                 if active_sharer and active_sharer != username and manager.has_user(room_id, active_sharer):
                     await manager.send_to(room_id, username, {
                         "type": "error",
+                        "code": "screen_denied",
                         "message": f"{active_sharer} is already sharing their screen",
                     })
                     continue

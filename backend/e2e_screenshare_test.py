@@ -115,6 +115,7 @@ async def main():
         await viewer.send(json.dumps({"type": "screen:start"}))
         err = await recv_type(viewer, "error")
         check("member blocked from sharing", "permission" in err["message"].lower(), str(err))
+        check("denial carries screen_denied code", err.get("code") == "screen_denied", str(err))
 
         # --- 7. duplicate usernames are rejected -----------------------------
         dup = await websockets.connect(f"{WS}/ws/{room_id}?username=viewer1")
