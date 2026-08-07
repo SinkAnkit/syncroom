@@ -3,6 +3,7 @@ import os
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from app.database import init_db
 from app.redis_client import close_redis
 from app.routes import rooms, websocket
@@ -29,6 +30,25 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="SyncRoom API", lifespan=lifespan)
+
+
+# Turn unhandled exceptions into a real JSON 500 *before* they reach the CORS
+# middleware. Starlette's default ServerErrorMiddleware sits outside CORS, so a
+# raw 500 ships with no Access-Control-Allow-Origin header — the browser then
+# blocks the response and the frontend only sees an opaque "Failed to fetch",
+# hiding the actual server error. This middleware is registered first so the
+# CORS middleware (added next) wraps it and can decorate the error response.
+@app.middleware("http")
+async def catch_unhandled_errors(request, call_next):
+    try:
+        return await call_next(request)
+    except Exception:
+        logger.exception("Unhandled error on %s %s", request.method, request.url.path)
+        return JSONResponse(
+            status_code=500,
+            content={"detail": "Internal server error"},
+        )
+
 
 # CORS — allow all origins in dev, restrict via CORS_ORIGINS in production.
 _origins_env = os.getenv("CORS_ORIGINS", "*").strip()

@@ -41,42 +41,57 @@ async def get_db():
         yield session
 
 
+async def _run_migration(sql: str, label: str):
+    """
+    Run a single best-effort DDL statement in its *own* transaction.
+
+    Each statement must be isolated: on PostgreSQL the first failing statement
+    (e.g. ADD COLUMN for a column that already exists) aborts the whole
+    transaction, so every later statement sharing it fails with "current
+    transaction is aborted" — which previously meant the avatar_color widening
+    silently never ran on existing databases, and signup 500'd on the too-long
+    HSL value. A fresh transaction per statement keeps one caught failure from
+    poisoning the rest.
+    """
+    try:
+        async with engine.begin() as conn:
+            await conn.execute(text(sql))
+        logger.info(f"Migration applied: {label}")
+    except Exception:
+        pass  # Already applied, or not applicable to this database
+
+
 async def init_db():
     """Create tables and add any missing columns."""
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 
-    # Migrate: add missing columns to rooms table
-    async with engine.begin() as conn:
-        for col_name, col_def_pg, col_def_sqlite in [
-            ("is_public", "BOOLEAN DEFAULT TRUE", "BOOLEAN DEFAULT 1"),
-            ("viewer_count", "INTEGER DEFAULT 0", "INTEGER DEFAULT 0"),
-            ("mode", "VARCHAR(20) DEFAULT 'youtube'", "VARCHAR(20) DEFAULT 'youtube'"),
-            ("upload_filename", "TEXT DEFAULT NULL", "TEXT DEFAULT NULL"),
-        ]:
-            try:
-                is_pg = "postgresql" in DATABASE_URL
-                col_def = col_def_pg if is_pg else col_def_sqlite
-                await conn.execute(text(f"ALTER TABLE rooms ADD COLUMN {col_name} {col_def}"))
-                logger.info(f"Added column rooms.{col_name}")
-            except Exception:
-                pass  # Column already exists
+    is_pg = "postgresql" in DATABASE_URL
 
-        # Older deployments created avatar_color as VARCHAR(7), but the auth
-        # route stores generated HSL values such as hsl(222, 70%, 60%).
-        try:
-            if "postgresql" in DATABASE_URL:
-                await conn.execute(
-                    text("ALTER TABLE users ALTER COLUMN avatar_color TYPE VARCHAR(32)")
-                )
-                logger.info("Widened users.avatar_color to VARCHAR(32)")
-        except Exception:
-            pass  # Already migrated or database does not have the old schema
+    # Migrate: add missing columns to rooms table (older schemas predate these).
+    for col_name, col_def_pg, col_def_sqlite in [
+        ("is_public", "BOOLEAN DEFAULT TRUE", "BOOLEAN DEFAULT 1"),
+        ("viewer_count", "INTEGER DEFAULT 0", "INTEGER DEFAULT 0"),
+        ("mode", "VARCHAR(20) DEFAULT 'youtube'", "VARCHAR(20) DEFAULT 'youtube'"),
+        ("upload_filename", "TEXT DEFAULT NULL", "TEXT DEFAULT NULL"),
+    ]:
+        col_def = col_def_pg if is_pg else col_def_sqlite
+        await _run_migration(
+            f"ALTER TABLE rooms ADD COLUMN {col_name} {col_def}",
+            f"rooms.{col_name} added",
+        )
 
-        # Make video_url nullable (was NOT NULL in old schema)
-        try:
-            if "postgresql" in DATABASE_URL:
-                await conn.execute(text("ALTER TABLE rooms ALTER COLUMN video_url DROP NOT NULL"))
-                logger.info("Made rooms.video_url nullable")
-        except Exception:
-            pass
+    # Postgres-only column-type fixes for databases created by older schemas.
+    if is_pg:
+        # Old deployments created avatar_color as VARCHAR(7) (hex colors), but the
+        # auth route now stores generated HSL values such as hsl(222, 70%, 60%).
+        await _run_migration(
+            "ALTER TABLE users ALTER COLUMN avatar_color TYPE VARCHAR(32)",
+            "users.avatar_color widened to VARCHAR(32)",
+        )
+        # video_url was NOT NULL in the old schema; rooms can now be created
+        # without one (screenshare / upload modes).
+        await _run_migration(
+            "ALTER TABLE rooms ALTER COLUMN video_url DROP NOT NULL",
+            "rooms.video_url made nullable",
+        )
